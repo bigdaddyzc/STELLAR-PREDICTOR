@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stellar Predictor — Pattern-Based Planet Prediction</title>
+    <script>
+    // Load Plotly asynchronously with CDN fallback — must NOT block page render
+    (function loadPlotly(cdnIndex) {
+        var CDNS = [
+            'https://cdn.jsdelivr.net/npm/plotly.js@2.27.0/dist/plotly.min.js',
+            'https://unpkg.com/plotly.js@2.27.0/dist/plotly.min.js',
+        ];
+        if (cdnIndex >= CDNS.length) {
+            document.getElementById('plotly-warn').textContent = 'Plotly CDN failed — chart unavailable / CDN 加载失败';
+            document.getElementById('plotly-warn').style.display = 'block';
+            return;
+        }
+        var s = document.createElement('script');
+        s.src = CDNS[cdnIndex];
+        s.onload = function() { console.log('Plotly loaded from CDN ' + cdnIndex); };
+        s.onerror = function() { loadPlotly(cdnIndex + 1); };
+        document.head.appendChild(s);
+    })(0);
+    </script>
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+    <div id="plotly-warn" style="display:none;background:#f8514933;color:#f85149;text-align:center;padding:6px;font-size:0.8rem">
+        Plotly failed to load &mdash; charts may be unavailable. Check network.
+    </div>
+    <div id="error-banner" style="display:none;background:#f8514933;color:#f85149;text-align:center;padding:6px;font-size:0.8rem"></div>
+
+    <header>
+        <h1>STELLAR PREDICTOR</h1>
+        <p class="subtitle">Orbital Pattern Analysis / 轨道规律分析 &mdash; Predict Unknown Planets / 预测未知天体</p>
+    </header>
+
+    <main>
+        <div class="panel-left">
+            <section class="control-panel">
+                <h2>System Browser / 星系浏览器</h2>
+                <div class="form-group">
+                    <label for="system-select">Planetary System / 行星系统</label>
+                    <select id="system-select">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Known Planets / 已知行星</label>
+                    <div id="planet-list" class="planet-list"></div>
+                </div>
+                <button id="analyze-btn" class="btn-primary" onclick="startAnalysis()">
+                    Analyze / 开始分析
+                </button>
+                <p style="font-size:0.75rem;color:#8b949e;margin-top:0.5rem">
+                    Fits Titius-Bode law + Hill stability to find orbital gaps
+                    where unknown planets could exist.<br>
+                    基于 Titius-Bode 法则和 Hill 稳定性，寻找可能藏有未知天体的轨道间隙。
+                </p>
+            </section>
+
+            <section class="progress-panel" id="progress-panel" style="display:none">
+                <h2>Progress / 进度</h2>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <p class="progress-text" id="progress-text">Waiting...</p>
+            </section>
+
+            <section class="results-panel" id="results-panel">
+                <h2>Predicted Gaps / 预测间隙</h2>
+                <p class="analysis-status" style="font-size:0.7rem;color:#8b949e;margin-bottom:0.75rem"></p>
+                <div class="tb-summary" id="tb-summary"></div>
+                <div id="gaps-list">
+                    <p style="color:#8b949e;padding:2rem;text-align:center;line-height:1.8">
+                        Click <strong>Analyze</strong> to detect orbital gaps<br>
+                        点击<strong>开始分析</strong>检测轨道间隙
+                    </p>
+                </div>
+            </section>
+        </div>
+
+        <div class="panel-right">
+            <section class="viz-section" style="flex:2">
+                <h2>System Distribution / 天体分布示意图</h2>
+                <div id="distribution-plot" class="plot-container">
+                    <p class="placeholder">Select a system and click Analyze / 选择星系并点击分析</p>
+                </div>
+            </section>
+
+            <section class="viz-section">
+                <h2>Prediction Report / 预测报告</h2>
+                <div id="report-container">
+                    <p class="placeholder" style="padding:2rem;text-align:center">Run analysis to see detailed report / 运行分析后查看详细报告</p>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>
