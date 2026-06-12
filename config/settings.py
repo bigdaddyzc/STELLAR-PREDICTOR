@@ -27,6 +27,15 @@ STABILITY_CRITICAL_SEP = 10.0
 TB_SCORE_WEIGHT = 0.5
 STABILITY_SCORE_WEIGHT = 0.5
 
+# Titius-Bode skip-aware fitting (v0.3)
+TB_MAX_SKIPS = 3            # max missing-planet slots allowed in the index sequence
+TB_SKIP_MIN_R2_GAIN = 0.01  # min R^2 improvement required to prefer a skip fit
+
+# Mean-motion resonance scoring (v0.3)
+RESONANCE_SCORE_WEIGHT = 0.1
+RESONANCES = [(2, 1), (3, 2), (5, 3), (4, 3)]
+RESONANCE_TOLERANCE = 0.05  # relative distance from exact commensurability
+
 # Verification
 VERIFICATION_THRESHOLD = 1.5
 VERIFICATION_TIMEOUT = 600

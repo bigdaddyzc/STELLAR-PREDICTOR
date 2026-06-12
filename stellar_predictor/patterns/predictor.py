@@ -2,6 +2,12 @@
 
 This is the primary prediction engine. It operates purely analytically on
 known planet parameters — no N-body simulation required.
+
+v0.3 improvements:
+- Mean-motion resonance scoring as a third signal alongside TB + stability
+- Eccentricity-aware Hill stability gaps
+- Confidence intervals for the predicted semi-major axes derived from
+  TB-fit residual scatter
 """
 
 from __future__ import annotations
@@ -18,6 +24,17 @@ from stellar_predictor.patterns.stability import (
     StabilityRegion,
 )
 from stellar_predictor.patterns.titius_bode import TitiusBodeFit, TBResult
+
+try:
+    from config.settings import (
+        RESONANCES,
+        RESONANCE_SCORE_WEIGHT,
+        RESONANCE_TOLERANCE,
+    )
+except ImportError:  # standalone fallback
+    RESONANCES = [(2, 1), (3, 2), (5, 3), (4, 3)]
+    RESONANCE_SCORE_WEIGHT = 0.1
+    RESONANCE_TOLERANCE = 0.05
 
 
 @dataclass
@@ -38,11 +55,13 @@ class GapPredictor:
     def __init__(self, stellar_mass: float = 1.0,
                  min_known_planets: int = 3,
                  tb_weight: float = 0.5,
-                 stability_weight: float = 0.5):
+                 stability_weight: float = 0.5,
+                 resonance_weight: float = RESONANCE_SCORE_WEIGHT):
         self.stellar_mass = stellar_mass
         self.min_known_planets = min_known_planets
         self.tb_weight = tb_weight
         self.stability_weight = stability_weight
+        self.resonance_weight = resonance_weight
         self._tb_fitter = TitiusBodeFit()
         self._stability = StabilityAnalyzer(stellar_mass=stellar_mass)
 
@@ -54,7 +73,9 @@ class GapPredictor:
         t0 = time.perf_counter()
         warnings = []
         system_name = self._get_system_name(system)
-        planet_data = StabilityAnalyzer.extract_planet_data(system)
+        planet_full = StabilityAnalyzer.extract_planet_data_full(system)
+        planet_data = [(n, a, m) for n, a, m, _ in planet_full]
+        eccs = [e for _, _, _, e in planet_full]
 
         if len(planet_data) < 2:
             warnings.append("Need at least 2 planets for gap analysis")
@@ -80,13 +101,19 @@ class GapPredictor:
                     f"Titius-Bode fit quality low (R^2={tb_result.r_squared:.2f}). "
                     "Gap predictions may be unreliable."
                 )
+            if tb_result.loocv_rmse > 0.25:
+                warnings.append(
+                    f"TB fit LOOCV RMSE high ({tb_result.loocv_rmse:.2f} in log-a). "
+                    "Fit may not generalize."
+                )
 
-        # 2. Stability analysis
-        stability_regions = self._stability.find_stability_gaps(planet_data)
+        # 2. Stability analysis (eccentricity-aware)
+        stability_regions = self._stability.find_stability_gaps(
+            planet_data, eccentricities=eccs)
 
         # 3. Cross-reference TB gaps with stability regions
         predicted_gaps = self._cross_reference(
-            axes, names, tb_result, stability_regions, planet_data
+            axes, names, tb_result, stability_regions, planet_data, eccs
         )
 
         # 4. Normalize scores at system level
@@ -116,19 +143,50 @@ class GapPredictor:
         """Run prediction on multiple systems."""
         return {self._get_system_name(s): self.predict(s) for s in systems}
 
+    def _resonance_score(self, predicted_a: float, inner_a: float,
+                         outer_a: float) -> float:
+        """Score [0, 1] for proximity of the predicted orbit to low-order
+        mean-motion resonances with its neighbors.
+
+        Bodies in (or near) low-order commensurabilities with neighbors
+        (e.g. 3:2, 2:1) are dynamically protected — a predicted orbit near
+        such a resonance is more plausible than one in between.
+        """
+        best = 0.0
+        if inner_a <= 0 or outer_a <= inner_a or predicted_a <= 0:
+            return best
+        for p, q in RESONANCES:
+            ratio = (p / q) ** (2.0 / 3.0)  # Kepler: a ~ P^(2/3)
+            # Resonant orbit exterior to the inner neighbor,
+            # and interior to the outer neighbor
+            for a_res in (inner_a * ratio, outer_a / ratio):
+                if inner_a < a_res < outer_a:
+                    rel = abs(predicted_a - a_res) / a_res
+                    if rel < RESONANCE_TOLERANCE:
+                        best = max(best, 1.0 - rel / RESONANCE_TOLERANCE)
+        return best
+
     def _cross_reference(self, axes: list[float], names: list[str],
                          tb_result: Optional[TBResult],
                          stability_regions: list[StabilityRegion],
-                         planet_data: list[tuple[str, float, float]]
+                         planet_data: list[tuple[str, float, float]],
+                         eccs: Optional[list[float]] = None
                          ) -> list[GapResult]:
         """Cross-reference TB gaps with stability regions to produce scored gaps.
 
         Two-pass approach:
-        1. Compute per-gap TB and stability scores
+        1. Compute per-gap TB, stability and resonance scores
         2. Cross-validate non-adjacent gaps for TB consistency boost
         """
         n = len(axes)
         gaps: list[GapResult] = []
+        if eccs is None or len(eccs) < n:
+            eccs = [0.0] * n
+
+        # TB residual scatter (log-space) for confidence intervals
+        tb_sigma = 0.0
+        if tb_result is not None and tb_result.residuals:
+            tb_sigma = float(np.std(tb_result.residuals))
 
         # ---- Pass 1: per-gap scoring ----
         for i in range(n - 1):
@@ -182,11 +240,27 @@ class GapPredictor:
                     predicted_a_lower = max(predicted_a_lower, sr.inner_boundary_au)
                     predicted_a_upper = min(predicted_a_upper, sr.outer_boundary_au)
 
+            # Resonance signal
+            resonance = self._resonance_score(predicted_a, inner_a, outer_a)
+
+            # Confidence interval from TB residual scatter (log-space sigma)
+            if tb_sigma > 0:
+                ci_lower = predicted_a * float(np.exp(-tb_sigma))
+                ci_upper = predicted_a * float(np.exp(tb_sigma))
+                new_lower = max(predicted_a_lower, ci_lower)
+                new_upper = min(predicted_a_upper, ci_upper)
+                if new_lower < new_upper:
+                    predicted_a_lower, predicted_a_upper = new_lower, new_upper
+
+            w_total = self.tb_weight + self.stability_weight + self.resonance_weight
             combined = (self.tb_weight * tb_score +
-                        self.stability_weight * stability_score)
+                        self.stability_weight * stability_score +
+                        self.resonance_weight * resonance) / max(w_total, 1e-9)
 
             period = predicted_a ** 1.5
             method = "titius_bode+stability" if tb_result else "stability_only"
+            if resonance > 0.5:
+                method += "+resonance"
 
             gaps.append(GapResult(
                 inner_a=inner_a, outer_a=outer_a,
@@ -201,6 +275,8 @@ class GapPredictor:
                 outer_planet=outer_name,
                 predicted_a_lower=round(predicted_a_lower, 4),
                 predicted_a_upper=round(predicted_a_upper, 4),
+                predicted_eccentricity=round((eccs[i] + eccs[i + 1]) / 2.0, 4),
+                resonance_score=round(resonance, 3),
             ))
 
         # ---- Pass 2: cross-gap consistency ----
