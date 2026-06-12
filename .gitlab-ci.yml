@@ -1,0 +1,15 @@
+stages:
+  - test
+
+pytest:
+  stage: test
+  image: python:3.11
+  before_script:
+    - pip install --upgrade pip
+    - pip install -e ".[dev,web]"
+  script:
+    - pytest tests/ -v -m "not slow"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH =~ /^optimize\//
