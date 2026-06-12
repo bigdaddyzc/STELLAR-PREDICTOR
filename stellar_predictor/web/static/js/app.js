@@ -68,7 +68,7 @@ async function loadPlanets(systemName) {
         const planetList = document.getElementById('planet-list');
         planetList.innerHTML = data.planets.map(p => {
             const mass = p.mass_earth != null
-                ? ` <span style="color:#8b949e">(${p.mass_earth.toFixed(1)} M&#x2295;)</span>`
+                ? ` <span style="color:#93a4bd">(${p.mass_earth.toFixed(1)} M&#x2295;)</span>`
                 : '';
             return `<span class="planet-chip">${p.name}<span class="a-label">${p.semi_major_axis_au} AU${mass}</span></span>`;
         }).join('');
@@ -172,6 +172,8 @@ async function checkTaskStatus() {
 function loadResults(result) {
     if (!result) return;
 
+    document.getElementById('results-panel').style.display = '';
+
     const tbSummary = document.getElementById('tb-summary');
     if (result.tb_fit) {
         const tb = result.tb_fit;
@@ -187,7 +189,7 @@ function loadResults(result) {
     const gapsList = document.getElementById('gaps-list');
     const gaps = result.gaps || [];
     if (gaps.length === 0) {
-        gapsList.innerHTML = '<p style="color:#8b949e;padding:1rem">No significant gaps detected.</p>';
+        gapsList.innerHTML = '<p style="color:#93a4bd;padding:1rem">No significant gaps detected.</p>';
         return;
     }
 
@@ -196,6 +198,9 @@ function loadResults(result) {
             : g.combined_score >= 0.3 ? 'gap-score-mid' : 'gap-score-weak';
         const label = g.combined_score >= 0.5 ? 'Strong'
             : g.combined_score >= 0.3 ? 'Possible' : 'Weak';
+        const resChip = (g.resonance_score != null)
+            ? `<span>Res ${Number(g.resonance_score).toFixed(2)}</span>`
+            : '';
 
         return `<div class="gap-card">
             <div class="gap-header">
@@ -205,11 +210,12 @@ function loadResults(result) {
             <div class="gap-body">
                 <div>Pred. orbit / 预测轨道: <span class="pred-a">${g.predicted_a_au.toFixed(2)} AU</span></div>
                 <div class="pred-period">Period / 周期: ${g.predicted_period_years.toFixed(1)} yr</div>
-                <div style="font-size:0.75rem;color:#8b949e">Mass / 质量: ${g.estimated_mass_min.toFixed(2)} &ndash; ${Number(g.estimated_mass_max).toFixed(0)} M&#x2295;</div>
+                <div style="font-size:0.75rem;color:#93a4bd">Mass / 质量: ${g.estimated_mass_min.toFixed(2)} &ndash; ${Number(g.estimated_mass_max).toFixed(0)} M&#x2295;</div>
             </div>
             <div class="gap-scores">
                 <span>TB ${g.titius_bode_score.toFixed(2)}</span>
                 <span>Stab ${g.stability_score.toFixed(2)}</span>
+                ${resChip}
                 <span>${g.method}</span>
             </div>
         </div>`;
@@ -227,26 +233,30 @@ async function loadDistributionPlot() {
     if (!el) return;
 
     if (typeof Plotly === 'undefined') {
-        el.innerHTML = '<p class="placeholder" style="color:#d29922">Plotly not loaded / CDN 未加载 — chart unavailable</p>';
+        el.innerHTML = '<p class="placeholder" style="color:#fbbf24">Plotly not loaded / CDN 未加载 — chart unavailable</p>';
         return;
     }
 
     try {
         const data = await apiGet(`/api/viz/distribution/${currentTaskId}`);
         if (!data || data.error) {
-            el.innerHTML = `<p class="placeholder" style="color:#f85149">${(data && data.error) || 'No data'}</p>`;
+            el.innerHTML = `<p class="placeholder" style="color:#fb7185">${(data && data.error) || 'No data'}</p>`;
             return;
         }
         if (!data.data || !data.layout) {
-            el.innerHTML = '<p class="placeholder" style="color:#f85149">Invalid plot data structure</p>';
+            el.innerHTML = '<p class="placeholder" style="color:#fb7185">Invalid plot data structure</p>';
             return;
         }
+        // Theme the Plotly chart to match the cosmic dark UI
+        data.layout.paper_bgcolor = 'rgba(0,0,0,0)';
+        data.layout.plot_bgcolor = 'rgba(10,15,34,0.35)';
+        data.layout.font = Object.assign({}, data.layout.font, {color: '#93a4bd'});
         Plotly.newPlot('distribution-plot', data.data, data.layout, {
             responsive: true, displayModeBar: true,
             modeBarButtonsToRemove: ['lasso2d', 'select2d'],
         });
     } catch (e) {
-        el.innerHTML = `<p class="placeholder" style="color:#f85149">Chart render failed: ${e.message || e}</p>`;
+        el.innerHTML = `<p class="placeholder" style="color:#fb7185">Chart render failed: ${e.message || e}</p>`;
         showError('Distribution plot', e);
     }
 }
@@ -258,7 +268,7 @@ function loadReport(result) {
     const container = document.getElementById('report-container');
     const report = result.report;
     if (!report || !report.predicted_bodies || report.predicted_bodies.length === 0) {
-        container.innerHTML = '<p style="color:#8b949e;padding:2rem;text-align:center">No predictions to report. / 无预测结果。</p>';
+        container.innerHTML = '<p style="color:#93a4bd;padding:2rem;text-align:center">No predictions to report. / 无预测结果。</p>';
         return;
     }
 
@@ -280,7 +290,7 @@ function loadReport(result) {
         html += `<div class="param-row"><span class="param-label">Stability regions / 稳定区</span><span class="param-value">${ref.stability_regions}</span></div>
                 <div class="param-row"><span class="param-label">Analysis time / 分析耗时</span><span class="param-value">${ref.execution_time_s}s</span></div>`;
         if (ref.warnings && ref.warnings.length > 0) {
-            html += `<div class="param-row"><span class="param-label" style="color:#d29922">Warnings / 警告</span><span class="param-value" style="color:#d29922">${ref.warnings.join('; ')}</span></div>`;
+            html += `<div class="param-row"><span class="param-label" style="color:#fbbf24">Warnings / 警告</span><span class="param-value" style="color:#fbbf24">${ref.warnings.join('; ')}</span></div>`;
         }
         html += `</div></div>`;
     }
