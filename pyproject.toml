@@ -1,0 +1,40 @@
+[project]
+name = "stellar-predictor"
+version = "0.1.0"
+description = "Predict unknown celestial bodies through gravitational perturbation analysis and Bayesian inference"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "astropy>=5.3",
+    "astroquery>=0.4.6",
+    "rebound>=4.0",
+    "emcee>=3.1",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+    "plotly>=5.15",
+    "corner>=2.2",
+    "tqdm>=4.65",
+    "pyyaml>=6.0",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-cov", "pre-commit"]
+notebooks = ["jupyter>=1.0", "jupyterlab>=4.0", "ipywidgets>=8.0"]
+web = ["fastapi>=0.100", "uvicorn[standard]>=0.23", "websockets>=11.0"]
+
+[project.scripts]
+stellar-predictor = "stellar_predictor.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stellar_predictor*", "config*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
