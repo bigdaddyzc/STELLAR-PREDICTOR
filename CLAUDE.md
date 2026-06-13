@@ -74,18 +74,24 @@ stellar_predictor/
 
 ### Primary Prediction Pipeline (Pattern-Based)
 
-1. Extract sorted (name, a_au, mass) tuples from any system representation
-2. Fit Titius-Bode law: a_n = α × β^n (log-linear regression, mass-weighted option)
-3. Analyze orbital spacing with Hill-radius stability criteria
-4. For each adjacent planet pair: compute TB score (ratio-excess scaling) + stability score → combined confidence
-5. Predicted position: geometric mean of inner/outer semi-major axes, bias toward stable region
-6. Cross-gap consistency pass: verify non-adjacent gaps are TB-consistent → boost scores
-7. System-level score normalization: combined_score /= sqrt(max_score)
-8. Derive physical parameters for each predicted body (M-R relation, equilibrium temperature, surface gravity, Hill sphere)
+1. Extract sorted (name, a_au, mass, ecc) tuples from any system representation
+2. Fit Titius-Bode law: a_n = α × β^n (skip-aware log-linear regression, LOOCV diagnostics)
+3. Analyze orbital spacing with eccentricity-aware Hill-radius stability criteria
+4. For each adjacent planet pair: compute TB score + sigmoid stability score + Gaussian resonance score → combined confidence with dynamic weights
+5. Predicted position: geometric mean → resonance-aware bias toward nearest MMR within stable zone
+6. Uncertainty propagation from TB residual sigma to mass, period, and combined score
+7. Multi-planet-per-wide-gap detection via TB harmonic spacing
+8. Outer-edge prediction via TB beta extrapolation (up to 3 steps beyond last planet)
+9. Cross-gap consistency pass: amplitude-modulated boost for TB-aligned multi-step spans
+10. System-level logistic normalization: score / (score + 0.15)
+11. Derive physical parameters for each predicted body (M-R relation, equilibrium temperature, surface gravity, Hill sphere)
 
 ### Unit System
 
-All physics uses REBOUND conventions: **AU, years, solar masses**. Mass estimates in the report use **Earth masses (M_earth)**. Velocities from JPL Horizons arrive in AU/day and are converted to AU/yr when added to REBOUND.
+All physics uses REBOUND conventions: **AU, years, solar masses**.
+- `CelestialBody.mass` — solar masses
+- `ExoplanetSystem.planets["mass"]` — Earth masses (converted to solar by `extract_planet_data_full()`)
+- Mass estimates in the report use **Earth masses (M_earth)**. Velocities from JPL Horizons arrive in AU/day and are converted to AU/yr when added to REBOUND.
 
 ### Data Models
 

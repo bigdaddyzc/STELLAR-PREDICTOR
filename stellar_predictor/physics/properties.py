@@ -18,6 +18,8 @@ def mass_radius_relation(mass_earth: float) -> float:
     - Bashi et al. (2017) for Neptune-like transition (2-130 M_earth)
     - Degenerate regime for gas giants (>130 M_earth, ~Jupiter radius)
     """
+    if mass_earth <= 0:
+        return 0.1
     if mass_earth < 2.0:
         return mass_earth ** 0.27
     elif mass_earth < 130.0:

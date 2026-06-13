@@ -123,12 +123,16 @@ class StabilityAnalyzer:
                 gap_ratio = span / max(r_crit, 1e-12)
 
                 max_mass = self._max_stable_mass(a_mid, r_h_mutual)
+                # v0.4: Tighter mass priors — min from Hill packing, max gated by gap width
+                mass_if_fills_30pct = (gap_width / a_mid) ** 3 * 3.0 * self.stellar_mass * 332946.0 * 0.027
+                min_mass_earth = max(0.1, min(max_mass * 0.01, mass_if_fills_30pct))
+                max_mass_earth = min(max_mass * 3.0, 10000.0)
                 regions.append(StabilityRegion(
                     inner_boundary_au=float(inner_boundary),
                     outer_boundary_au=float(outer_boundary),
                     width_au=float(gap_width),
-                    min_mass_estimate=0.1,
-                    max_mass_estimate=max_mass,
+                    min_mass_estimate=min_mass_earth,
+                    max_mass_estimate=max_mass_earth,
                     gap_ratio=float(gap_ratio),
                     neighbor_inner=inner.planet_name,
                     neighbor_outer=outer.planet_name,

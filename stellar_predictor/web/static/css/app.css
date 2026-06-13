@@ -278,6 +278,21 @@ select:focus, input:focus {
     line-height: 1.8;
 }
 
+/* Filtered gaps notice */
+.filter-notice {
+    margin-top: 1rem;
+    padding: 0.8rem;
+    background: rgba(251, 191, 36, 0.08);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: 10px;
+}
+.filter-notice-header {
+    font-size: 0.8rem;
+    color: #fbbf24;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+}
+
 #results-summary .param-row {
     display: flex;
     justify-content: space-between;

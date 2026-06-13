@@ -221,6 +221,24 @@ function loadResults(result) {
         </div>`;
     }).join('');
 
+    // Filter info: show how many gaps were filtered and why
+    const fi = result.filter_info;
+    if (fi && fi.filtered_count > 0) {
+        let filterHtml = `<div class="filter-notice">
+            <div class="filter-notice-header">⚠ Filtered / 已过滤: ${fi.filtered_count} of ${fi.total_gaps} unreliable gap(s)</div>`;
+        filterHtml += `<details style="font-size:0.75rem;color:#93a4bd;cursor:pointer;">
+            <summary style="margin-bottom:0.3rem;">Show filtered / 显示已过滤</summary>`;
+        (fi.filtered_gaps || []).forEach(fg => {
+            filterHtml += `<div style="padding:0.25rem 0;border-bottom:1px solid rgba(110,138,180,0.1);">
+                <span style="color:#fb7185;">#${fg.index} ${fg.inner_planet}→${fg.outer_planet}</span>
+                <span style="color:#93a4bd;margin-left:0.5rem;">score=${fg.combined_score.toFixed(2)}</span>
+                <div style="color:#a0aec0;font-size:0.7rem;padding-left:0.5rem;">${fg.reasons.join('; ')}</div>
+            </div>`;
+        });
+        filterHtml += `</details></div>`;
+        gapsList.insertAdjacentHTML('afterend', filterHtml);
+    }
+
     // Render prediction report
     loadReport(result);
 }

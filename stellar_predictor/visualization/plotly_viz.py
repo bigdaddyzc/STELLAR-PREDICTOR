@@ -6,6 +6,7 @@ from typing import Optional
 
 import numpy as np
 
+from stellar_predictor.patterns.reliability import filter_gaps
 from stellar_predictor.data.models import GapResult, Residuals, SimulationResult, StellarSystem
 from stellar_predictor.inference.candidate import CandidateBody
 from stellar_predictor.physics.residuals import PeriodogramResult
@@ -383,10 +384,11 @@ def titius_bode_plot(tb_result, system_name: str = "",
 
     # Predicted gaps
     if gaps:
+        gaps_to_plot, _ = filter_gaps(gaps)
         gap_indices = []
         gap_log_a = []
         gap_labels = []
-        for g in gaps:
+        for g in gaps_to_plot:
             if not g.is_edge if hasattr(g, 'is_edge') else True:
                 idx_est = int(round(np.log(g.predicted_a / tb_result.alpha)
                                    / np.log(tb_result.beta)))
@@ -537,8 +539,9 @@ def system_distribution_plot(system,
 
     # --- Predicted bodies (prominently highlighted) ---
     if gaps:
+        gaps_to_plot, _ = filter_gaps(gaps)
         gap_colors = ["#ff4444", "#ff6b2b", "#ff9500", "#ffb700"]
-        for i, gap in enumerate(gaps):
+        for i, gap in enumerate(gaps_to_plot):
             if gap.predicted_a <= 0:
                 continue
             color = gap_colors[min(i, len(gap_colors) - 1)]
@@ -674,7 +677,8 @@ def spacing_stability_plot(system, stability_regions,
 
     # Predicted gap markers
     if gaps:
-        for i, g in enumerate(gaps):
+        gaps_to_plot, _ = filter_gaps(gaps)
+        for i, g in enumerate(gaps_to_plot):
             traces.append({
                 "type": "scatter",
                 "mode": "markers",
