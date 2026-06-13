@@ -15,12 +15,43 @@ from stellar_predictor.prediction.pipeline import PredictionPipeline
 from stellar_predictor.data.models import CelestialBody, OrbitalElements, StellarSystem, ExoplanetSystem
 from stellar_predictor.physics import NBodySimulator
 from stellar_predictor.physics.properties import planet_from_mass
+from stellar_predictor.patterns.reliability import filter_gaps, filter_summary
 from stellar_predictor.visualization.plotly_viz import (
     system_distribution_plot,
     titius_bode_plot,
     spacing_stability_plot,
 )
 from stellar_predictor.web.schemas import AnalysisRequest
+
+try:
+    from config.settings import (
+        RELIABILITY_MIN_COMBINED_SCORE,
+        RELIABILITY_REQUIRE_SUPPORTING_SIGNAL,
+        RELIABILITY_MAX_MASS_RATIO,
+        RELIABILITY_MAX_MASS_UPPER,
+        RELIABILITY_OUTER_EDGE_STABILITY_CHECK,
+        RELIABILITY_OUTER_EDGE_MAX_SCORE,
+        RELIABILITY_SUB_GAP_MIN_STABILITY,
+    )
+except ImportError:
+    RELIABILITY_MIN_COMBINED_SCORE = 0.20
+    RELIABILITY_REQUIRE_SUPPORTING_SIGNAL = True
+    RELIABILITY_MAX_MASS_RATIO = 1000.0
+    RELIABILITY_MAX_MASS_UPPER = 5000.0
+    RELIABILITY_OUTER_EDGE_STABILITY_CHECK = True
+    RELIABILITY_OUTER_EDGE_MAX_SCORE = 0.75
+    RELIABILITY_SUB_GAP_MIN_STABILITY = 0.10
+
+# Reliability filter config shared by formatting functions
+_RELIABILITY_CONFIG = {
+    "min_combined_score": RELIABILITY_MIN_COMBINED_SCORE,
+    "require_supporting_signal": RELIABILITY_REQUIRE_SUPPORTING_SIGNAL,
+    "max_mass_ratio": RELIABILITY_MAX_MASS_RATIO,
+    "max_mass_upper": RELIABILITY_MAX_MASS_UPPER,
+    "outer_edge_stability_penalty": RELIABILITY_OUTER_EDGE_STABILITY_CHECK,
+    "outer_edge_max_score": RELIABILITY_OUTER_EDGE_MAX_SCORE,
+    "sub_gap_min_stability": RELIABILITY_SUB_GAP_MIN_STABILITY,
+}
 
 SOLAR_SYSTEM_PLANETS = [
     ("Mercury", 1.66012e-7, 0.3871, 0.2056, 0.1222, 0.8436, 0.5088, 4.4026),
@@ -188,7 +219,7 @@ def _build_system(system_name: str):
         system = ExoplanetSystem(name=system_name, stellar_mass=star_mass)
         for pname, mass, a, ecc in planets:
             system.planets.append({
-                "name": pname, "a": a, "mass": mass / 332946,
+                "name": pname, "a": a, "mass": mass,  # Earth masses (extract_planet_data_full converts to solar)
                 "eccentricity": ecc,
             })
         return system
@@ -204,9 +235,13 @@ def _generate_prediction_report(result, system_name: str, stellar_mass: float,
                                  stellar_teff: float, stellar_radius: float) -> dict:
     """Generate bilingual (zh/en) parameter report for each predicted gap."""
     star_info = STELLAR_INFO.get(system_name, {"mass": 1.0, "radius": 1.0, "teff": 5778.0})
+
+    # Apply reliability filter (same config as _format_analysis_result)
+    reliable_gaps_report, verdicts = filter_gaps(result.predicted_gaps, _RELIABILITY_CONFIG)
+    filtered_count = len(result.predicted_gaps) - len(reliable_gaps_report)
     planet_data = []
 
-    for i, gap in enumerate(result.predicted_gaps):
+    for i, gap in enumerate(reliable_gaps_report):
         mass_low = gap.estimated_mass_range[0]
         mass_high = gap.estimated_mass_range[1]
 
@@ -259,7 +294,18 @@ def _generate_prediction_report(result, system_name: str, stellar_mass: float,
         "stability_regions": len(result.stability_regions),
         "execution_time_s": round(result.execution_time_s, 4),
         "warnings": result.warnings,
+        "total_gaps": len(result.predicted_gaps),
+        "filtered_gaps": filtered_count,
     }
+
+    # Add warning about filtered gaps
+    if filtered_count > 0:
+        warnings = list(result.warnings)
+        warnings.append(
+            f"{filtered_count} gap(s) filtered as unreliable. "
+            "Only showing reliable predictions."
+        )
+        system_ref["warnings"] = warnings
 
     return {
         "predicted_bodies": planet_data,
@@ -272,8 +318,12 @@ def _generate_prediction_report(result, system_name: str, stellar_mass: float,
 # ---------------------------------------------------------------------------
 
 def _format_analysis_result(result, report: dict | None = None) -> dict:
+    # Apply reliability filter
+    reliable_gaps, verdicts = filter_gaps(result.predicted_gaps, _RELIABILITY_CONFIG)
+    filtered_verdicts = [v for v in verdicts if not v.is_reliable]
+
     gaps_data = []
-    for i, g in enumerate(result.predicted_gaps):
+    for i, g in enumerate(reliable_gaps):
         gaps_data.append({
             "index": i + 1,
             "inner_planet": g.inner_planet,
@@ -289,6 +339,22 @@ def _format_analysis_result(result, report: dict | None = None) -> dict:
             "estimated_mass_max": round(g.estimated_mass_range[1], 0),
             "method": g.method,
         })
+
+    # Build filter metadata
+    fi = filter_summary(verdicts)
+    filtered_gaps_info = []
+    for v in filtered_verdicts:
+        g = result.predicted_gaps[v.gap_index]
+        filtered_gaps_info.append({
+            "index": v.gap_index + 1,
+            "inner_planet": g.inner_planet,
+            "outer_planet": g.outer_planet,
+            "predicted_a_au": g.predicted_a,
+            "combined_score": g.combined_score,
+            "method": g.method,
+            "reasons": v.reasons,
+        })
+    fi["filtered_gaps"] = filtered_gaps_info
 
     tb_data = None
     if result.tb_fit:
@@ -309,6 +375,7 @@ def _format_analysis_result(result, report: dict | None = None) -> dict:
         "stability_regions_count": len(result.stability_regions),
         "warnings": result.warnings,
         "top_gap": gaps_data[0] if gaps_data else None,
+        "filter_info": fi,
     }
 
     if report:

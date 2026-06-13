@@ -136,6 +136,7 @@ class GapResult:
     predicted_a_lower: float = 0.0
     predicted_a_upper: float = 0.0
     predicted_eccentricity: float = 0.0
+    resonance_score: float = 0.0
 
 
 @dataclass

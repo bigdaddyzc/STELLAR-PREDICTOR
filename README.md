@@ -1,142 +1,232 @@
-# Stellar Predictor
+# 🌟 Stellar Predictor
 
-基于轨道规律分析（Titius-Bode 法则 + Hill 稳定性）预测行星系统中可能存在的未知天体，并推导其物理参数（质量、半径、密度、温度、表面重力等）。
+**Detect orbital gaps that could host unknown planets — through Titius-Bode law fitting, Hill-radius stability analysis, and multi-signal pattern fusion.**
 
-Predict unknown celestial bodies in planetary systems through Titius-Bode law fitting and Hill-radius stability analysis, with derived physical parameters.
+[![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-teal?logo=fastapi)](https://fastapi.tiangolo.com)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-## 快速开始 / Quick Start
+---
+
+## ✨ Overview
+
+Stellar Predictor analyzes known planetary systems to identify orbital gaps where unknown planets could exist. It combines three independent signals into a unified confidence score:
+
+| Signal | Method |
+|--------|--------|
+| **Titius-Bode** | Skip-aware log-linear regression with LOOCV diagnostics |
+| **Stability** | Eccentricity-aware Hill radius mutual separation |
+| **Resonance** | Gaussian MMR proximity scoring with order penalty |
+
+**5 supported systems**: Solar System, TRAPPIST-1, Kepler-11, Kepler-33, HD 219134
+
+---
+
+## 🖥️ Web Interface
+
+![Stellar Predictor Web UI](assets/web_ui.png)
+
+The web interface provides:
+- **System browser** — select from 5 planetary systems
+- **Orbital distribution diagram** — 2D Plotly chart with known and predicted bodies
+- **Titius-Bode fit plot** — regression visualization
+- **Spacing & stability plot** — stability region analysis
+- **Bilingual prediction report** — complete physical parameters (zh/en)
+- **Reliability filtering** — low-confidence predictions are hidden with transparent audit trail
+
+---
+
+## 🚀 Quick Start
 
 ```bash
-# 安装 / Install
-cd stellar-predictor
+# Install (editable with dev tools)
 pip install -e ".[dev,notebooks]"
 
-# 启动 Web 界面 / Launch web interface
+# Launch web interface
 stellar-predictor serve --host 127.0.0.1 --port 8000
-# 浏览器打开 http://127.0.0.1:8000
 
-# 运行测试 / Run tests
-pytest tests/ -v
-
-# CLI 使用 / CLI usage
-stellar-predictor predict --target Uranus --exclude Neptune --years 165
+# Open http://127.0.0.1:8000
 ```
 
-## Web 界面 / Web Interface
+### Commands
 
-访问 `http://127.0.0.1:8000` 后可进行以下操作：
+```bash
+# Predict gaps for Solar System (CLI)
+stellar-predictor analyze --system solar_system
 
-- **星系浏览器**：5 个行星系统（太阳系、TRAPPIST-1、Kepler-11、Kepler-33、HD 219134）
-- **天体分布示意图**：2D 轨道俯瞰图，球体标记行星，菱形标记预测天体
-- **预测报告**：中英双语，包含半长轴、轨道周期、质量、半径、密度、平衡温度、表面重力、Hill 球半径、行星类型、系统年龄等参数
-- **预测间隙**：按置信度排序的间隙卡片，显示 TB 分数和稳定性分数
+# Run tests
+pytest tests/ -v
 
-## 项目结构 / Project Structure
+# Neptune retrodiction demo
+python scripts/run_neptune_demo.py
+
+# Full accuracy evaluation
+PYTHONIOENCODING=utf-8 python scripts/eval_accuracy.py
+```
+
+---
+
+## 🧠 How It Works
+
+### Prediction Pipeline (v0.5)
+
+The pipeline flows: **Data → Patterns → Properties → Visualization**
+
+```
+1. Extract planet data (sorted by semi-major axis)
+2. Fit Titius-Bode law: a_n = α × β^n (skip-aware)
+3. Analyze orbital spacing with Hill-radius stability
+4. Score each gap: TB + Stability (sigmoid) + Resonance (Gaussian)
+5. Dynamic weights based on TB fit quality (R²)
+6. Resonance-aware position bias toward nearest MMR
+7. Multi-planet detection for wide gaps (TB harmonic spacing)
+8. Outer-edge prediction via TB beta extrapolation
+9. Cross-gap consistency pass (amplitude-modulated boost)
+10. Logistic system-level normalization: score/(score+0.15)
+11. **Reliability filtering** — 6-criteria evaluation per gap
+12. Derive physical parameters (M-R relation, T_eq, surface gravity, Hill sphere)
+```
+
+### Scoring Formula
+
+```
+combined = (TB_w × TB_score + Stab_w × Stab_score + Res_w × Res_score) / total_w
+normalized = combined / (combined + 0.15)
+```
+
+Weights adjust dynamically with TB fit quality.
+
+### Reliability Filter
+
+All predicted gaps pass through 6 checks before being shown:
+
+| Criterion | Default | Purpose |
+|-----------|---------|---------|
+| Min combined score | 0.20 | Remove noise |
+| Supporting signal | ≥1 non-zero | Remove zero-signal gaps |
+| Mass range sanity | ratio ≤ 1000 | Remove unphysical ranges |
+| Outer-edge inflation | Penalty + cap at 0.75 | Speculative extrapolations |
+| Sub-gap stability | ≥ 0.10 | Remove unsupported sub-gaps |
+| Position sanity | a ≤ 500 AU | Remove extreme outliers |
+
+**Result**: 46 raw predictions → 25 reliable (54% reliability rate)
+
+---
+
+## 📊 Accuracy
+
+| System | TB R² | Total | Reliable | Top Prediction |
+|--------|-------|-------|----------|----------------|
+| Solar System | 0.998 | 11 | 8 | Saturn→Uranus (0.784) |
+| TRAPPIST-1 | 0.994 | 9 | 6 | d→e (0.737) |
+| Kepler-11 | 0.997 | 10 | 4 | f→g (0.857) |
+| Kepler-33 | 0.998 | 9 | 4 | b→c (0.870) |
+| HD 219134 | 0.994 | 7 | 3 | c→d (0.806) |
+
+**Neptune retrodiction**: 7-planet Solar System → predicts Neptune at 30.97 AU (3.0% error)
+
+**Asteroid Belt**: Mars→Jupiter gap at 2.91 AU vs Ceres at 2.77 AU (5.2% error)
+
+---
+
+## 🏗️ Architecture
 
 ```
 stellar_predictor/
-├── data/              # 数据获取与模型 / Data acquisition & models
-│   ├── models.py          # CelestialBody, StellarSystem, ExoplanetSystem, GapResult
-│   └── fetcher.py         # JPL Horizons 数据获取
-├── physics/           # 物理引擎 / Physics engine
-│   ├── nbody.py           # REBOUND N-body 积分器
-│   ├── kepler.py          # Kepler 方程求解
-│   ├── residuals.py       # 残差分析 + Lomb-Scargle 周期图
-│   └── properties.py      # M-R 关系、平衡温度、表面重力、Hill 球等
-├── patterns/          # 轨道规律分析 / Orbital pattern analysis
-│   ├── titius_bode.py     # Titius-Bode 法则拟合（含质量加权）
-│   ├── stability.py       # Hill 半径、稳定性区域检测
-│   └── predictor.py       # 间隙预测（TB + 稳定性 + 跨间隙一致性）
-├── prediction/        # 预测流水线 / Prediction pipeline
-│   └── pipeline.py        # PredictionPipeline.analyze(system)
-├── inference/         # 参数推断 / Parameter estimation
-│   ├── optimizer.py       # 差分进化优化器
-│   └── candidate.py       # 候选天体参数
-├── verification/      # 验证 / Verification
-│   └── perturbation.py    # 扰动注入交叉验证
-├── visualization/     # 可视化 / Visualization
-│   ├── plotly_viz.py      # 天体分布图、TB 拟合图、间距分析图
-│   └── orbit_plot.py      # Matplotlib 轨道图
-├── web/               # Web 服务 / Web interface
-│   ├── app.py             # FastAPI 应用
-│   ├── tasks.py           # 后台分析任务、报告生成
-│   └── routes/            # API 路由（系统、分析、可视化）
-└── static/            # 前端静态资源 / Frontend assets
-    ├── index.html         # 主页面
-    ├── css/app.css        # 暗色主题样式
-    └── js/app.js          # 异步轮询、Plotly 渲染、报告展示
+├── patterns/          # Core prediction engine
+│   ├── titius_bode.py     TB fitting (skip-aware, LOOCV)
+│   ├── stability.py       Hill-radius stability analysis
+│   ├── predictor.py       GapPredictor (multi-signal fusion)
+│   └── reliability.py     Reliability filter (v0.5)
+├── physics/           # Physical parameter derivation
+│   ├── properties.py      M-R relations, T_eq, surface gravity
+│   ├── kepler.py          Kepler equation solver
+│   └── nbody.py           REBOUND N-body integrator
+├── data/              # Data models
+│   └── models.py          CelestialBody, GapResult, ExoplanetSystem
+├── web/               # FastAPI web interface
+│   ├── app.py             Application factory
+│   ├── tasks.py           Analysis orchestration + report generation
+│   ├── routes/            API endpoints
+│   └── static/            Frontend (JS + CSS + HTML)
+├── visualization/     # Plotly charts
+│   └── plotly_viz.py      Distribution, TB fit, stability plots
+├── prediction/        # High-level pipeline
+│   └── pipeline.py        PredictionPipeline orchestrator
+├── verification/      # Perturbation verification
+│   └── perturbation.py    N-body cross-validation
+└── cli.py             # Click CLI entry point
 ```
 
-## 预测原理 / Prediction Method
+### Key Design Decisions
 
-### 轨道规律分析 / Pattern-Based Analysis
+- **Bilingual UI** — All labels and reports in Chinese and English
+- **Cosmic dark theme** — Visual design inspired by space observatory UIs
+- **Async analysis** — Gap detection runs in background thread with progress polling
+- **Reliability-first** — Low-confidence predictions are hidden, not marked down
+- **Unit conventions** — AU, years, solar masses (REBOUND compatible)
 
-1. 提取行星数据（名称、半长轴、质量），按轨道距离排序
-2. 拟合 Titius-Bode 法则：a_n = α × β^n（对数线性回归，可选质量加权）
-3. 计算相邻行星对的 Hill 稳定性
-4. 对每个间隙计算 TB 分数 + 稳定性分数 → 综合置信度
-5. 预测位置取几何平均，偏置向稳定区域
-6. 跨间隙一致性验证：非相邻间隙若满足 β^(j-i) 则加分
-7. 系统级分数归一化：combined_score /= sqrt(max_score)
+---
 
-### 物理参数推导 / Physical Properties
+## 🔧 Configuration
 
-基于分析公式推导预测天体的物理参数：
-- **质量**：Hill 稳定性约束范围
-- **半径**：分段 M-R 关系（岩石 → 海王星类 → 气态巨行星）
-- **密度**：由质量和半径自洽计算
-- **平衡温度**：T_eq = T_* × √(R_* / 2a) × (1 - A)^0.25
-- **表面重力**：g = GM/R²
-- **Hill 球半径**：R_H = a × (m / 3M)^(1/3)
-
-## 演示 / Demo
-
-### 海王星预测 / Neptune Prediction
-
-经典验证：从太阳系移除海王星，通过天王星轨道扰动重新预测其存在。
+All tuning parameters in `config/settings.py`:
 
 ```python
-from stellar_predictor.data import DataFetcher
-from stellar_predictor.detection import OrbitalResidualMethod
-from stellar_predictor.physics import NBodySimulator
+# Scoring weights
+TB_BASE_WEIGHT = 0.50
+STABILITY_BASE_WEIGHT = 0.40
+RESONANCE_BASE_WEIGHT = 0.10
 
-# 获取不含海王星的太阳系
-fetcher = DataFetcher()
-system = fetcher.fetch_system("solar_system", exclude=["Neptune"])
+# Resonance catalog (8 ratios)
+RESONANCES = [(2,1), (3,2), (4,3), (5,3), (5,4), (3,1), (5,2), (7,3)]
 
-# 模拟天王星完整轨道
-full_system = fetcher.fetch_system("solar_system")
-sim = NBodySimulator(full_system)
-result = sim.simulate(t_end=165, n_steps=500)
-
-# 运行扰动探测
-method = OrbitalResidualMethod()
-detection = method.detect(system, result.positions["Uranus"], result.times, "Uranus")
-print(detection.best.summary())
+# Reliability thresholds
+RELIABILITY_MIN_COMBINED_SCORE = 0.20
+RELIABILITY_OUTER_EDGE_MAX_SCORE = 0.75
+RELIABILITY_SUB_GAP_MIN_STABILITY = 0.10
 ```
 
-### 规律分析 / Pattern Analysis
+---
 
-```python
-from stellar_predictor.prediction import PredictionPipeline
-from stellar_predictor.data.models import ExoplanetSystem
+## 🧪 Testing
 
-# 加载 TRAPPIST-1 系统
-system = ExoplanetSystem(name="TRAPPIST-1", stellar_mass=0.089)
-# ... 添加行星数据 ...
+```bash
+pytest tests/ -v                    # All tests
+pytest tests/ -v --tb=short         # Verbose failures
+pytest tests/ -m "not slow"         # Skip slow integration
+pytest tests/test_physics/          # Physics only
+pytest tests/test_patterns/         # Pattern analysis only
 
-# 运行规律分析
-pipeline = PredictionPipeline()
-result = pipeline.analyze(system)
-for gap in result.predicted_gaps:
-    print(f"{gap.inner_planet} → {gap.outer_planet}: "
-          f"a={gap.predicted_a:.2f} AU, score={gap.combined_score:.2f}")
+# Coverage
+pytest tests/ --cov=stellar_predictor
 ```
 
-## 依赖 / Dependencies
+**47 tests** covering: physics (kepler, nbody), patterns (TB fit, stability, predictor, reliability), integration (solar system).
 
-- **rebound** — N-body 积分器
-- **scipy** — 差分进化优化、Lomb-Scargle 周期图
-- **plotly** — 交互式 Web 可视化
-- **fastapi** + **uvicorn** — Web 服务
-- **numpy** — 数组运算
+---
+
+## 📚 Version History
+
+| Version | Features |
+|---------|----------|
+| v0.5 | Reliability filter, frontend filter UI, accuracy report |
+| v0.4 | Outer-edge prediction, multi-planet gaps, dynamic weights, sigmoid scoring |
+| v0.3 | Resonance scoring, eccentricity-aware stability, LOOCV diagnostics |
+| v0.2 | Skip-aware TB fitting, Hill-radius stability, basic predictions |
+| v0.1 | Initial prototype: simple OLS TB fit + basic validation |
+
+---
+
+## 📄 License
+
+MIT
+
+---
+
+## 🙏 Acknowledgments
+
+- NASA Exoplanet Archive for exoplanet system data
+- JPL Horizons for Solar System orbital elements
+- REBOUND N-body integrator
+- Plotly for interactive visualization
