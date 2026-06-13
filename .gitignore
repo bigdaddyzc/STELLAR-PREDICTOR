@@ -14,3 +14,4 @@ venv/
 *.code-workspace
 *.log
 /tmp/
+CLAUDE.md

@@ -19,6 +19,7 @@ def analyze(system: str):
     analysis to identify orbital gaps where unknown planets could exist.
     """
     from stellar_predictor.prediction.pipeline import PredictionPipeline
+    from stellar_predictor.patterns.reliability import filter_gaps, filter_summary
 
     click.echo(f"Loading system: {system}")
     pipeline = PredictionPipeline()
@@ -34,10 +35,16 @@ def analyze(system: str):
 
     result = pipeline.analyze(full_system)
 
+    # Apply reliability filter
+    reliable_gaps, verdicts = filter_gaps(result.predicted_gaps)
+    filtered_count = len(result.predicted_gaps) - len(reliable_gaps)
+
     click.echo(f"\n{'='*60}")
     click.echo(f"  ANALYSIS: {result.system_name}")
     click.echo(f"  Known planets: {result.num_known_planets}")
     click.echo(f"  Execution time: {result.execution_time_s:.3f}s")
+    if filtered_count > 0:
+        click.echo(f"  ({filtered_count} gap(s) filtered as unreliable)")
     click.echo(f"{'='*60}")
 
     if result.tb_fit:
@@ -54,7 +61,7 @@ def analyze(system: str):
     click.echo(f"  {'#':<4} {'Inner':>8s} {'Outer':>8s} {'Pred a':>8s} {'Period':>8s} {'TB':>6s} {'Stab':>6s} {'Comb':>6s}")
     click.echo(f"  {'-'*56}")
 
-    for i, gap in enumerate(result.predicted_gaps):
+    for i, gap in enumerate(reliable_gaps):
         click.echo(
             f"  {i+1:<4} {gap.inner_planet:>8s} {gap.outer_planet:>8s} "
             f"{gap.predicted_a:>7.2f} AU {gap.predicted_period:>7.1f} yr "
@@ -67,7 +74,7 @@ def analyze(system: str):
         for w in result.warnings:
             click.echo(f"    - {w}")
 
-    top = result.predicted_gaps[0] if result.predicted_gaps else None
+    top = reliable_gaps[0] if reliable_gaps else None
     if top and top.combined_score > 0.3:
         click.echo(f"\n  Top prediction: gap between {top.inner_planet} and "
                     f"{top.outer_planet} at {top.predicted_a:.2f} AU "
