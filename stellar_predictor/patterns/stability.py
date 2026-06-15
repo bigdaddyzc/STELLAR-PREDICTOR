@@ -188,7 +188,8 @@ class StabilityAnalyzer:
                 a = p.get("a")
                 mass = p.get("mass", 0.0)
                 name = p.get("name", "?")
-                ecc = p.get("e", 0.0) or 0.0
+                # Accept both "eccentricity" (canonical) and legacy "e" key.
+                ecc = p.get("eccentricity", p.get("e", 0.0)) or 0.0
                 if a is not None and a > 0:
                     mass_solar = mass / 332946.0 if mass > 0 else 1e-6
                     data.append((name, float(a), float(mass_solar), float(ecc)))

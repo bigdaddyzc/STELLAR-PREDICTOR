@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -26,7 +27,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Stellar Predictor",
         description="Predict unknown celestial bodies through gravitational perturbation analysis",
-        version="0.1.0",
+        version=_pkg_version("stellar-predictor"),
         lifespan=lifespan,
     )
 
