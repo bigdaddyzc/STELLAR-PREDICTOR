@@ -6,33 +6,32 @@ import asyncio
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
-from stellar_predictor.prediction.pipeline import PredictionPipeline
-from stellar_predictor.physics.properties import planet_from_mass
-from stellar_predictor.patterns.reliability import filter_gaps, filter_summary
-from stellar_predictor.visualization.plotly_viz import (
-    system_distribution_plot,
-    titius_bode_plot,
-    spacing_stability_plot,
-)
-from stellar_predictor.web.schemas import AnalysisRequest
 from stellar_predictor.data.known_systems import (
-    EXOPLANET_DATA,
-    SOLAR_SYSTEM_PLANETS,
     STELLAR_INFO,
+)
+from stellar_predictor.data.known_systems import (
     build_system as _build_known_system,
 )
+from stellar_predictor.patterns.reliability import filter_gaps, filter_summary
+from stellar_predictor.physics.properties import planet_from_mass
+from stellar_predictor.prediction.pipeline import PredictionPipeline
+from stellar_predictor.visualization.plotly_viz import (
+    spacing_stability_plot,
+    system_distribution_plot,
+    titius_bode_plot,
+)
+from stellar_predictor.web.schemas import AnalysisRequest
 
 try:
     from config.settings import (
-        RELIABILITY_MIN_COMBINED_SCORE,
-        RELIABILITY_REQUIRE_SUPPORTING_SIGNAL,
         RELIABILITY_MAX_MASS_RATIO,
         RELIABILITY_MAX_MASS_UPPER,
-        RELIABILITY_OUTER_EDGE_STABILITY_CHECK,
+        RELIABILITY_MIN_COMBINED_SCORE,
         RELIABILITY_OUTER_EDGE_MAX_SCORE,
+        RELIABILITY_OUTER_EDGE_STABILITY_CHECK,
+        RELIABILITY_REQUIRE_SUPPORTING_SIGNAL,
         RELIABILITY_SUB_GAP_MIN_STABILITY,
     )
 except ImportError:
@@ -61,11 +60,11 @@ class AnalysisTask:
     status: str = "pending"
     progress: float = 0.0
     stage: str = ""
-    result: Optional[dict] = None
-    error: Optional[str] = None
-    distribution_plot_data: Optional[dict] = None
-    tb_plot_data: Optional[dict] = None
-    spacing_plot_data: Optional[dict] = None
+    result: dict | None = None
+    error: str | None = None
+    distribution_plot_data: dict | None = None
+    tb_plot_data: dict | None = None
+    spacing_plot_data: dict | None = None
 
 
 class TaskManager:
@@ -82,7 +81,7 @@ class TaskManager:
                loop: asyncio.AbstractEventLoop):
         loop.run_in_executor(self.executor, self._run_analysis, task_id, request)
 
-    def get_task(self, task_id: str) -> Optional[AnalysisTask]:
+    def get_task(self, task_id: str) -> AnalysisTask | None:
         return self.tasks.get(task_id)
 
     def _run_analysis(self, task_id: str, request: AnalysisRequest):
@@ -168,11 +167,14 @@ def _generate_prediction_report(result, system_name: str, stellar_mass: float,
     # Apply reliability filter (same config as _format_analysis_result)
     reliable_gaps_report, verdicts = filter_gaps(result.predicted_gaps, _RELIABILITY_CONFIG)
     filtered_count = len(result.predicted_gaps) - len(reliable_gaps_report)
+    # Map each reliable gap to its verdict (carries the graded score).
+    reliable_verdicts = [v for v in verdicts if v.is_reliable]
     planet_data = []
 
     for i, gap in enumerate(reliable_gaps_report):
         mass_low = gap.estimated_mass_range[0]
         mass_high = gap.estimated_mass_range[1]
+        verdict = reliable_verdicts[i] if i < len(reliable_verdicts) else None
 
         params = planet_from_mass(
             mass_earth_low=mass_low,
@@ -198,6 +200,9 @@ def _generate_prediction_report(result, system_name: str, stellar_mass: float,
             "inner_planet": inner_ref,
             "outer_planet": outer_ref,
             "combined_score": gap.combined_score,
+            "reliability_score": verdict.score if verdict else 0.0,
+            "reliability_grade": verdict.grade if verdict else "",
+            "reliability_components": verdict.components if verdict else {},
             "method": gap.method,
         })
 
@@ -250,9 +255,11 @@ def _format_analysis_result(result, report: dict | None = None) -> dict:
     # Apply reliability filter
     reliable_gaps, verdicts = filter_gaps(result.predicted_gaps, _RELIABILITY_CONFIG)
     filtered_verdicts = [v for v in verdicts if not v.is_reliable]
+    reliable_verdicts = [v for v in verdicts if v.is_reliable]
 
     gaps_data = []
     for i, g in enumerate(reliable_gaps):
+        verdict = reliable_verdicts[i] if i < len(reliable_verdicts) else None
         gaps_data.append({
             "index": i + 1,
             "inner_planet": g.inner_planet,
@@ -264,6 +271,8 @@ def _format_analysis_result(result, report: dict | None = None) -> dict:
             "titius_bode_score": g.titius_bode_score,
             "stability_score": g.stability_score,
             "combined_score": g.combined_score,
+            "reliability_score": verdict.score if verdict else 0.0,
+            "reliability_grade": verdict.grade if verdict else "",
             "estimated_mass_min": round(g.estimated_mass_range[0], 2),
             "estimated_mass_max": round(g.estimated_mass_range[1], 0),
             "method": g.method,

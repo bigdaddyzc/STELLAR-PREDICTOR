@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class AnalysisRequest(BaseModel):
@@ -23,10 +21,10 @@ class VerifyRequest(BaseModel):
 
 class PlanetInfo(BaseModel):
     name: str
-    semi_major_axis_au: Optional[float] = None
-    period_years: Optional[float] = None
-    mass_earth: Optional[float] = None
-    eccentricity: Optional[float] = None
+    semi_major_axis_au: float | None = None
+    period_years: float | None = None
+    mass_earth: float | None = None
+    eccentricity: float | None = None
     is_star: bool = False
 
 
@@ -50,6 +48,8 @@ class GapInfo(BaseModel):
     titius_bode_score: float
     stability_score: float
     combined_score: float
+    reliability_score: float = 0.0
+    reliability_grade: str = ""
     estimated_mass_min: float
     estimated_mass_max: float
     method: str
@@ -60,5 +60,5 @@ class TaskStatusResponse(BaseModel):
     status: str
     progress: float = 0.0
     stage: str = ""
-    result: Optional[dict] = None
-    error: Optional[str] = None
+    result: dict | None = None
+    error: str | None = None

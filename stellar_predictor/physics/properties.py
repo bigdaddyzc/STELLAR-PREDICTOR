@@ -135,8 +135,8 @@ def planet_from_mass(
 
     # Self-consistent (mass, radius) pairs at 3 evaluation points
     r_points = [mass_radius_relation(m) for m in mass_points]
-    rho_points = [density_gcm3(m, r) for m, r in zip(mass_points, r_points)]
-    g_points = [surface_gravity_ms2(m, r) for m, r in zip(mass_points, r_points)]
+    rho_points = [density_gcm3(m, r) for m, r in zip(mass_points, r_points, strict=False)]
+    g_points = [surface_gravity_ms2(m, r) for m, r in zip(mass_points, r_points, strict=False)]
 
     r_low, r_high = min(r_points), max(r_points)
     rho_low, rho_high = min(rho_points), max(rho_points)

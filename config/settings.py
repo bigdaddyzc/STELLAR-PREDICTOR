@@ -29,7 +29,7 @@ STABILITY_SCORE_WEIGHT = 0.5
 
 # Titius-Bode skip-aware fitting (v0.3)
 TB_MAX_SKIPS = 3            # max missing-planet slots allowed in the index sequence
-TB_SKIP_MIN_R2_GAIN = 0.01  # min R^2 improvement required to prefer a skip fit
+TB_SKIP_MIN_R2_GAIN = 0.005  # min R^2 improvement required to prefer a skip fit
 
 # Mean-motion resonance scoring (v0.3 → v0.4)
 RESONANCE_SCORE_WEIGHT = 0.15
@@ -47,6 +47,16 @@ MULTI_PLANET_MIN_STEPS = 3      # min TB steps in a gap to allow sub-gaps
 TB_BASE_WEIGHT = 0.50           # base TB weight before R^2 adjustment
 STABILITY_BASE_WEIGHT = 0.40    # base stability weight before adjustment
 RESONANCE_BASE_WEIGHT = 0.10    # base resonance weight
+
+# v0.6: Scoring-curve constants (empirical, tuned against leave-one-out
+# retrodiction — see tests/test_validation/. Treat as calibrated defaults,
+# not first-principles physics.)
+TB_RATIO_EXCESS_THRESHOLD = 1.15   # min outer/inner ratio excess to flag a TB gap
+STABILITY_SIGMOID_SCALE = 2.5      # gap_ratio sigmoid steepness (lower = sharper)
+RESONANCE_PULL_FRACTION = 0.30     # max fraction to pull predicted_a toward an MMR
+CROSS_GAP_MAX_BOOST = 0.15         # max combined_score boost from TB-consistent spans
+CROSS_GAP_REL_ERR_TOLERANCE = 0.20  # max relative span error to earn a boost
+SYSTEM_LOGISTIC_OFFSET = 0.15      # x/(x+offset) system-level score normalization
 
 # Verification
 VERIFICATION_THRESHOLD = 1.5

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from contextlib import asynccontextmanager
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -10,7 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from stellar_predictor.web.routes import systems, predictions, visualizations
+from stellar_predictor.web.routes import predictions, systems, visualizations
 from stellar_predictor.web.tasks import TaskManager
 from stellar_predictor.web.websocket import router as ws_router
 

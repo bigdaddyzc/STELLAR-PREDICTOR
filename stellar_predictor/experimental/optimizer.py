@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import numpy as np
 from scipy.optimize import differential_evolution, minimize
 
 from config.settings import DE_MAX_ITER, DE_SEED, DE_TOL
-from stellar_predictor.data.models import Residuals, StellarSystem
+from stellar_predictor.data.models import StellarSystem
 from stellar_predictor.inference.candidate import CandidateBody
 from stellar_predictor.physics.nbody import NBodySimulator
 
@@ -74,7 +74,7 @@ class LeastSquaresOptimizer:
         target_body_name: str,
         bounds: list[tuple[float, float]] | None = None,
         method: str = "differential_evolution",
-        progress_callback: Optional[Callable[[str, float], None]] = None,
+        progress_callback: Callable[[str, float], None] | None = None,
     ) -> CandidateBody:
         """Find optimal parameters for the hidden body.
 

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 
-from stellar_predictor.patterns.reliability import filter_gaps
 from stellar_predictor.data.models import GapResult, Residuals, SimulationResult, StellarSystem
 from stellar_predictor.inference.candidate import CandidateBody
+from stellar_predictor.patterns.reliability import filter_gaps
 from stellar_predictor.physics.residuals import PeriodogramResult
+
 
 def _alpha_hex(hex_color: str, alpha: float) -> str:
     """Convert '#rrggbb' to 'rgba(r,g,b,a)' for semi-transparent overlays."""
@@ -43,9 +42,9 @@ PLANET_COLORS = {
 def orbit_plot_3d(
     simulation: SimulationResult,
     system: StellarSystem,
-    candidates: Optional[list[CandidateBody]] = None,
-    actual_body_sim: Optional[dict] = None,
-    predicted_gaps: Optional[list[GapResult]] = None,
+    candidates: list[CandidateBody] | None = None,
+    actual_body_sim: dict | None = None,
+    predicted_gaps: list[GapResult] | None = None,
 ) -> dict:
     """Generate Plotly JSON for 3D orbit visualization.
 
@@ -113,7 +112,6 @@ def orbit_plot_3d(
 
             x_orb = r * np.cos(theta)
             y_orb = r * np.sin(theta)
-            z_orb = np.zeros_like(x_orb)
 
             cos_O, sin_O = np.cos(Omega), np.sin(Omega)
             cos_i, sin_i = np.cos(inc), np.sin(inc)
@@ -187,7 +185,7 @@ def orbit_plot_3d(
 
 def residual_plot(
     residuals: Residuals,
-    periodogram: Optional[PeriodogramResult] = None,
+    periodogram: PeriodogramResult | None = None,
 ) -> dict:
     """Generate Plotly JSON for residual and periodogram subplots.
 
@@ -205,7 +203,7 @@ def residual_plot(
     if residuals.components is not None:
         labels = ["x", "y", "z"]
         colors = ["#4a90d9", "#e6553a", "#50c878"]
-        for i, (label, color) in enumerate(zip(labels, colors)):
+        for i, (label, color) in enumerate(zip(labels, colors, strict=False)):
             traces.append({
                 "type": "scatter",
                 "mode": "lines",
@@ -272,7 +270,7 @@ def residual_plot(
 
 def comparison_data(
     candidate: CandidateBody,
-    actual_params: Optional[dict] = None,
+    actual_params: dict | None = None,
 ) -> dict:
     """Generate comparison table data.
 
@@ -339,7 +337,7 @@ def comparison_data(
 
 
 def titius_bode_plot(tb_result, system_name: str = "",
-                     gaps: Optional[list[GapResult]] = None) -> dict:
+                     gaps: list[GapResult] | None = None) -> dict:
     """Generate Plotly JSON for Titius-Bode fit visualization.
 
     Shows log(a) vs index n with regression line, observed planets as points,
@@ -431,7 +429,7 @@ def titius_bode_plot(tb_result, system_name: str = "",
 
 
 def system_distribution_plot(system,
-                              gaps: Optional[list[GapResult]] = None,
+                              gaps: list[GapResult] | None = None,
                               system_name: str = "",
                               stellar_mass: float = 1.0) -> dict:
     """2D top-down orbital distribution diagram with known and predicted bodies.
@@ -496,7 +494,7 @@ def system_distribution_plot(system,
     })
 
     # --- Known planet orbits + large sphere markers ---
-    for i, (name, a, mass_e) in enumerate(zip(names, axes, masses_earth)):
+    for i, (name, a, mass_e) in enumerate(zip(names, axes, masses_earth, strict=False)):
         color = PLANET_COLORS.get(name, palette[i % len(palette)])
         x_ring = a * np.cos(theta)
         y_ring = a * np.sin(theta)
@@ -631,7 +629,7 @@ def system_distribution_plot(system,
 
 
 def spacing_stability_plot(system, stability_regions,
-                           gaps: Optional[list[GapResult]] = None,
+                           gaps: list[GapResult] | None = None,
                            system_name: str = "") -> dict:
     """Generate Plotly JSON for planetary spacing and stability analysis.
 
@@ -653,14 +651,14 @@ def spacing_stability_plot(system, stability_regions,
         "x": axes,
         "y": [0] * len(axes),
         "text": [f"{n}<br>{a:.2f} AU<br>{m:.1f} M_Earth" for n, a, m in
-                 zip(names, axes, masses)],
+                 zip(names, axes, masses, strict=False)],
         "hoverinfo": "text",
         "name": "Known planets",
         "marker": {"size": 14, "color": "#58a6ff", "symbol": "circle"},
     })
 
     # Stability regions as colored bands
-    for i, sr in enumerate(stability_regions):
+    for _i, sr in enumerate(stability_regions):
         if sr.width_au > 0:
             color = "rgba(63,185,80,0.15)" if sr.gap_ratio >= 1.0 else "rgba(210,153,34,0.05)"
             traces.append({
@@ -669,7 +667,7 @@ def spacing_stability_plot(system, stability_regions,
                 "x": [sr.inner_boundary_au, sr.outer_boundary_au],
                 "y": [0, 0],
                 "name": f"Stable ({sr.neighbor_inner}–{sr.neighbor_outer})"
-                        if sr.gap_ratio >= 1.0 else f"Tight gap",
+                        if sr.gap_ratio >= 1.0 else "Tight gap",
                 "line": {"width": 20, "color": color},
                 "opacity": 0.5,
                 "showlegend": sr.gap_ratio >= 1.0,
@@ -678,7 +676,7 @@ def spacing_stability_plot(system, stability_regions,
     # Predicted gap markers
     if gaps:
         gaps_to_plot, _ = filter_gaps(gaps)
-        for i, g in enumerate(gaps_to_plot):
+        for _i, g in enumerate(gaps_to_plot):
             traces.append({
                 "type": "scatter",
                 "mode": "markers",

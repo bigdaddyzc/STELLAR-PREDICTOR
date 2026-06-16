@@ -1,7 +1,6 @@
 """Tests for N-body simulator."""
 
 import numpy as np
-import pytest
 
 from stellar_predictor.data.models import CelestialBody, OrbitalElements, StellarSystem
 from stellar_predictor.physics.nbody import NBodySimulator

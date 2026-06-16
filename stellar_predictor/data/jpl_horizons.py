@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 from astropy.time import Time
 from astroquery.jplhorizons import Horizons
@@ -41,8 +39,8 @@ HORIZONS_IDS = {
 
 def fetch_solar_system(
     epoch: str = "2451545.0",  # J2000.0
-    bodies: Optional[list[str]] = None,
-    exclude: Optional[list[str]] = None,
+    bodies: list[str] | None = None,
+    exclude: list[str] | None = None,
 ) -> StellarSystem:
     """Fetch solar system state from JPL Horizons.
 

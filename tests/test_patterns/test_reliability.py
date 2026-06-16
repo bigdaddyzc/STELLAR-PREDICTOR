@@ -1,10 +1,8 @@
 """Tests for the prediction reliability filter."""
 
-import pytest
 
 from stellar_predictor.data.models import GapResult
 from stellar_predictor.patterns.reliability import ReliabilityFilter, filter_gaps, filter_summary
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -198,3 +196,55 @@ class TestFilterSummary:
         # Both gaps should have "combined_score" and "no supporting signal" reasons
         # Each reason appears at least once
         assert sum(s["filtered_reasons"].values()) >= 2
+
+
+class TestReliabilityScore:
+    """Graded reliability score (v0.6): 0-1 confidence per predicted body."""
+
+    def test_strong_gap_scores_high(self):
+        gap = _make_gap(combined=0.78, tb=0.9, stab=0.6, res=0.5,
+                        mass=(2.0, 8.0))
+        gap.predicted_a_lower = 0.9
+        gap.predicted_a_upper = 1.1
+        v = ReliabilityFilter().evaluate(gap)
+        assert v.is_reliable
+        assert v.score >= 0.7
+        assert "High" in v.grade
+        # all five components present
+        assert set(v.components) == {"signal", "agreement", "position",
+                                     "mass", "method"}
+
+    def test_unreliable_gap_capped(self):
+        """A gap failing hard checks can never score in the reliable band."""
+        gap = _make_gap(combined=0.6, tb=0.4, stab=0.85, res=0.0,
+                        mass=(0.5, 400.0),
+                        method="tb_extrapolation+stability_edge")
+        v = ReliabilityFilter().evaluate(gap)
+        assert not v.is_reliable
+        assert v.score <= 0.35
+
+    def test_agreement_rewards_multiple_signals(self):
+        """Three concurring signals beat one lone spike at equal combined."""
+        broad = _make_gap(combined=0.6, tb=0.6, stab=0.6, res=0.6)
+        narrow = _make_gap(combined=0.6, tb=0.6, stab=0.0, res=0.0)
+        flt = ReliabilityFilter()
+        assert (flt.evaluate(broad).components["agreement"]
+                > flt.evaluate(narrow).components["agreement"])
+
+    def test_position_rewards_tight_ci(self):
+        tight = _make_gap()
+        tight.predicted_a_lower = 0.95
+        tight.predicted_a_upper = 1.05
+        wide = _make_gap()
+        wide.predicted_a_lower = 0.5
+        wide.predicted_a_upper = 1.8
+        flt = ReliabilityFilter()
+        assert (flt.evaluate(tight).components["position"]
+                > flt.evaluate(wide).components["position"])
+
+    def test_grade_bands(self):
+        flt = ReliabilityFilter()
+        assert flt._grade(0.80) == "High / 高"
+        assert flt._grade(0.60) == "Moderate / 中"
+        assert flt._grade(0.40) == "Low / 低"
+        assert flt._grade(0.20) == "Very low / 极低"

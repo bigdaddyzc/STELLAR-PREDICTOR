@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.signal import lombscargle
 
-from stellar_predictor.data.models import Residuals, SimulationResult
+from stellar_predictor.data.models import Residuals
 
 
 class ResidualAnalyzer:

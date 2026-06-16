@@ -1,6 +1,6 @@
 [project]
 name = "stellar-predictor"
-version = "0.5.0"
+version = "0.6.0"
 description = "Predict unknown celestial bodies through gravitational perturbation analysis and Bayesian inference"
 requires-python = ">=3.10"
 dependencies = [
@@ -9,20 +9,20 @@ dependencies = [
     "astropy>=5.3",
     "astroquery>=0.4.6",
     "rebound>=4.0",
-    "emcee>=3.1",
-    "pandas>=2.0",
     "matplotlib>=3.7",
     "plotly>=5.15",
-    "corner>=2.2",
     "tqdm>=4.65",
     "pyyaml>=6.0",
     "click>=8.1",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-cov", "pre-commit"]
+dev = ["pytest>=7.0", "pytest-cov", "pre-commit", "ruff>=0.4", "mypy>=1.8"]
 notebooks = ["jupyter>=1.0", "jupyterlab>=4.0", "ipywidgets>=8.0"]
 web = ["fastapi>=0.100", "uvicorn[standard]>=0.23", "websockets>=11.0"]
+# Legacy perturbation-based detection (stellar_predictor.experimental.*) and
+# MCMC/corner plotting. Not needed for the primary pattern-based prediction.
+experimental = ["emcee>=3.1", "corner>=2.2", "pandas>=2.0"]
 
 [project.scripts]
 stellar-predictor = "stellar_predictor.cli:main"
@@ -38,3 +38,31 @@ include = ["stellar_predictor*", "config*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# Conservative starter set: pyflakes (F), pycodestyle errors (E),
+# import order (I), bugbear (B), pyupgrade (UP). Expand over time.
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    "E501",  # line length handled by formatter, not enforced yet
+    "B008",  # function calls in defaults (FastAPI Depends pattern)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B"]
+# Legacy/experimental code kept for research; not held to the active-code bar.
+"stellar_predictor/experimental/*" = ["E731", "F841", "B"]
+
+[tool.mypy]
+python_version = "3.10"
+# Lenient start: warn but don't fail on missing annotations. Tighten later.
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = false
+disallow_untyped_defs = false

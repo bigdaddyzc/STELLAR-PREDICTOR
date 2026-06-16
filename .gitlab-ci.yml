@@ -1,5 +1,19 @@
 stages:
+  - lint
   - test
+
+lint:
+  stage: lint
+  image: python:3.11
+  before_script:
+    - pip install --upgrade pip
+    - pip install ruff>=0.4
+  script:
+    - ruff check stellar_predictor config
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH =~ /^optimize\//
 
 pytest:
   stage: test

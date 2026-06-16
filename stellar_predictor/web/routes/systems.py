@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from stellar_predictor.data.known_systems import SOLAR_SYSTEM_PLANETS
 from stellar_predictor.web.schemas import PlanetInfo
-from stellar_predictor.web.tasks import SOLAR_SYSTEM_PLANETS
 
 router = APIRouter()
 

@@ -7,16 +7,14 @@ are excluded.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 import numpy as np
 
 from stellar_predictor.data.models import GapResult, StellarSystem
+from stellar_predictor.experimental.optimizer import LeastSquaresOptimizer
 from stellar_predictor.inference.candidate import CandidateBody
-from stellar_predictor.inference.optimizer import LeastSquaresOptimizer
 from stellar_predictor.physics.nbody import NBodySimulator
-from stellar_predictor.physics.residuals import ResidualAnalyzer
 
 
 @dataclass
@@ -26,7 +24,7 @@ class VerificationResult:
     nbody_residual_rms_without: float = 0.0
     nbody_residual_rms_with: float = 0.0
     improvement_ratio: float = 1.0
-    candidate: Optional[CandidateBody] = None
+    candidate: CandidateBody | None = None
     verified: bool = False
     significance: float = 0.0
     error: str = ""
@@ -50,7 +48,7 @@ class PerturbationVerifier:
         self._sim = NBodySimulator(system)
 
     def verify_gap(self, gap: GapResult,
-                   target_planets: Optional[list[str]] = None
+                   target_planets: list[str] | None = None
                    ) -> VerificationResult:
         """Test whether adding a planet at this gap reduces residuals.
 

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
-from stellar_predictor.data.models import CelestialBody, StellarSystem
+from stellar_predictor.data.models import StellarSystem
 
 
 class DataFetcher:
