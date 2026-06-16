@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 import numpy as np
-from astropy import units as u
 from astropy.time import Time
 
 
@@ -20,10 +18,10 @@ class OrbitalElements:
     longitude_ascending: float  # radians (Ω)
     argument_perihelion: float  # radians (ω)
     mean_anomaly: float  # radians (M at epoch)
-    epoch: Optional[Time] = None
+    epoch: Time | None = None
 
     @property
-    def period(self) -> Optional[float]:
+    def period(self) -> float | None:
         """Orbital period in years (requires parent mass context)."""
         return None
 
@@ -34,10 +32,10 @@ class CelestialBody:
 
     name: str
     mass: float  # solar masses
-    position: Optional[np.ndarray] = None  # 3D cartesian, AU
-    velocity: Optional[np.ndarray] = None  # 3D cartesian, AU/day
-    radius: Optional[float] = None  # solar radii
-    orbital_elements: Optional[OrbitalElements] = None
+    position: np.ndarray | None = None  # 3D cartesian, AU
+    velocity: np.ndarray | None = None  # 3D cartesian, AU/day
+    radius: float | None = None  # solar radii
+    orbital_elements: OrbitalElements | None = None
     metadata: dict = field(default_factory=dict)
 
     @property
@@ -59,7 +57,7 @@ class StellarSystem:
 
     name: str
     bodies: list[CelestialBody] = field(default_factory=list)
-    epoch: Optional[Time] = None
+    epoch: Time | None = None
     source: str = ""
 
     @property
@@ -77,14 +75,14 @@ class StellarSystem:
     def add_body(self, body: CelestialBody) -> None:
         self.bodies.append(body)
 
-    def remove_body(self, name: str) -> Optional[CelestialBody]:
+    def remove_body(self, name: str) -> CelestialBody | None:
         """Remove a body by name and return it."""
         for i, b in enumerate(self.bodies):
             if b.name.lower() == name.lower():
                 return self.bodies.pop(i)
         return None
 
-    def get_body(self, name: str) -> Optional[CelestialBody]:
+    def get_body(self, name: str) -> CelestialBody | None:
         for b in self.bodies:
             if b.name.lower() == name.lower():
                 return b
@@ -155,4 +153,4 @@ class Residuals:
     times: np.ndarray  # days
     values: np.ndarray  # residual magnitudes
     body_name: str
-    components: Optional[np.ndarray] = None  # (N, 3) x/y/z residuals
+    components: np.ndarray | None = None  # (N, 3) x/y/z residuals

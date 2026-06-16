@@ -315,12 +315,28 @@ function loadReport(result) {
 
     // Each predicted body
     report.predicted_bodies.forEach(body => {
+        const rel = (typeof body.reliability_score === 'number') ? body.reliability_score : 0;
+        const relClass = rel >= 0.75 ? 'gap-score-high'
+            : rel >= 0.55 ? 'gap-score-mid' : 'gap-score-weak';
+        const grade = body.reliability_grade || '';
         html += `<div class="report-card">
             <div class="report-header">
                 <span class="report-title">Predicted Body #${body.index} / 预测天体 #${body.index}</span>
-                <span class="report-score">Score / 评分: ${body.combined_score.toFixed(2)}</span>
+                <span class="report-score gap-score-badge ${relClass}" title="Graded reliability of this prediction / 该预测的综合可靠性评分">Reliability / 可靠性: ${rel.toFixed(2)}${grade ? ' · ' + grade : ''}</span>
             </div>
             <div class="report-body">`;
+
+        // Reliability breakdown (component contributions)
+        const c = body.reliability_components;
+        if (c && Object.keys(c).length > 0) {
+            html += `<div class="reliability-breakdown">
+                <span class="rb-item" title="Dynamical signal strength / 动力学信号强度">Signal/信号 ${(c.signal ?? 0).toFixed(2)}</span>
+                <span class="rb-item" title="Agreement across TB, stability, resonance / 多信号一致性">Agreement/一致性 ${(c.agreement ?? 0).toFixed(2)}</span>
+                <span class="rb-item" title="Positional precision from confidence interval / 位置精度">Position/位置 ${(c.position ?? 0).toFixed(2)}</span>
+                <span class="rb-item" title="Mass-range tightness / 质量约束">Mass/质量 ${(c.mass ?? 0).toFixed(2)}</span>
+                <span class="rb-item" title="Derivation-method credibility / 方法可信度">Method/方法 ${(c.method ?? 0).toFixed(2)}</span>
+            </div>`;
+        }
 
         body.params.forEach(p => {
             html += `<div class="param-row">

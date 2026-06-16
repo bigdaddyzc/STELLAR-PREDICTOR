@@ -18,13 +18,12 @@ def analyze(system: str):
     Fits a generalized Titius-Bode spacing law and Hill-radius stability
     analysis to identify orbital gaps where unknown planets could exist.
     """
+    from stellar_predictor.patterns.reliability import filter_gaps
     from stellar_predictor.prediction.pipeline import PredictionPipeline
-    from stellar_predictor.patterns.reliability import filter_gaps, filter_summary
 
     click.echo(f"Loading system: {system}")
     pipeline = PredictionPipeline()
 
-    from stellar_predictor.data.models import CelestialBody, OrbitalElements, StellarSystem
 
     # Load Solar System
     if system.lower() in ("solar_system", "solar"):
@@ -49,7 +48,7 @@ def analyze(system: str):
 
     if result.tb_fit:
         tb = result.tb_fit
-        click.echo(f"\n  Titius-Bode Fit:")
+        click.echo("\n  Titius-Bode Fit:")
         click.echo(f"    Log-linear: a_n = {tb.alpha:.3f} x {tb.beta:.3f}^n")
         if tb.c > 0:
             click.echo(f"    Classical:  a_n = {tb.a0:.3f} + {tb.b:.3f} x {tb.c:.3f}^n")
@@ -57,7 +56,7 @@ def analyze(system: str):
         if tb.outliers:
             click.echo(f"    Outliers: {', '.join(tb.outliers)}")
 
-    click.echo(f"\n  Predicted Gaps (by combined score):")
+    click.echo("\n  Predicted Gaps (by combined score):")
     click.echo(f"  {'#':<4} {'Inner':>8s} {'Outer':>8s} {'Pred a':>8s} {'Period':>8s} {'TB':>6s} {'Stab':>6s} {'Comb':>6s}")
     click.echo(f"  {'-'*56}")
 
@@ -70,7 +69,7 @@ def analyze(system: str):
         )
 
     if result.warnings:
-        click.echo(f"\n  Warnings:")
+        click.echo("\n  Warnings:")
         for w in result.warnings:
             click.echo(f"    - {w}")
 
@@ -79,7 +78,7 @@ def analyze(system: str):
         click.echo(f"\n  Top prediction: gap between {top.inner_planet} and "
                     f"{top.outer_planet} at {top.predicted_a:.2f} AU "
                     f"(score: {top.combined_score:.2f})")
-        click.echo(f"  This location COULD harbor an undiscovered planet.")
+        click.echo("  This location COULD harbor an undiscovered planet.")
 
 
 @click.command()
@@ -97,8 +96,8 @@ def survey(min_planets: int, output: str | None):
 @click.option("--gap-index", type=int, default=1, help="Which gap to verify (1-indexed)")
 def verify(system: str, gap_index: int):
     """Run N-body perturbation verification on a predicted gap."""
-    from stellar_predictor.prediction.pipeline import PredictionPipeline
     from stellar_predictor.physics import NBodySimulator
+    from stellar_predictor.prediction.pipeline import PredictionPipeline
 
     click.echo(f"Analyzing {system}...")
     pipeline = PredictionPipeline()
@@ -118,7 +117,9 @@ def verify(system: str, gap_index: int):
     sim = NBodySimulator(full_system)
     sim_result = sim.simulate(t_end=80, n_steps=400)
 
-    from stellar_predictor.verification.perturbation import PerturbationVerifier
+    from stellar_predictor.experimental.verification.perturbation import (
+        PerturbationVerifier,
+    )
     verifier = PerturbationVerifier(
         full_system,
         observed_positions=sim_result.positions,
@@ -141,6 +142,7 @@ def verify(system: str, gap_index: int):
 def serve(host: str, port: int):
     """Launch the web interface."""
     import uvicorn
+
     from stellar_predictor.web.app import create_app
     app = create_app()
     uvicorn.run(app, host=host, port=port)
@@ -149,6 +151,7 @@ def serve(host: str, port: int):
 def _build_solar_system():
     """Build Solar System model from hardcoded J2000 orbital elements."""
     import numpy as np
+
     from stellar_predictor.data.models import CelestialBody, OrbitalElements, StellarSystem
 
     planets = [

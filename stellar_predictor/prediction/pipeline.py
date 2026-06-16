@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from stellar_predictor.data.models import ExoplanetSystem, GapResult, StellarSystem
+from stellar_predictor.data.models import ExoplanetSystem, StellarSystem
 from stellar_predictor.patterns.predictor import GapPredictor, PredictionResult
-from stellar_predictor.verification.perturbation import (
-    PerturbationVerifier,
-    VerificationResult,
-)
+
+if TYPE_CHECKING:  # avoid importing the optional experimental extra at runtime
+    from stellar_predictor.experimental.verification.perturbation import (
+        VerificationResult,
+    )
 
 
 class PredictionPipeline:
@@ -32,19 +33,25 @@ class PredictionPipeline:
         return self._predictor.predict(system)
 
     def predict(self, system,
-                observed_positions: Optional[dict[str, np.ndarray]] = None,
-                times: Optional[np.ndarray] = None,
-                ) -> tuple[PredictionResult, Optional[list[VerificationResult]]]:
+                observed_positions: dict[str, np.ndarray] | None = None,
+                times: np.ndarray | None = None,
+                ) -> tuple[PredictionResult, list[VerificationResult] | None]:
         """Full pipeline: pattern analysis + optional perturbation verification.
 
         Returns:
             (prediction_result, verification_results or None)
+
+        Perturbation verification lives in the optional ``experimental`` extra
+        and is imported lazily so the core path never requires it.
         """
         pred_result = self.analyze(system)
 
         verification_results = None
         if (self.enable_verification and observed_positions is not None
                 and times is not None and isinstance(system, StellarSystem)):
+            from stellar_predictor.experimental.verification.perturbation import (
+                PerturbationVerifier,
+            )
             verifier = PerturbationVerifier(system, observed_positions, times)
             verification_results = verifier.verify_all_candidates(pred_result)
 

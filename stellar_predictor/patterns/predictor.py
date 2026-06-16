@@ -15,7 +15,6 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 import numpy as np
 
@@ -24,19 +23,25 @@ from stellar_predictor.patterns.stability import (
     StabilityAnalyzer,
     StabilityRegion,
 )
-from stellar_predictor.patterns.titius_bode import TitiusBodeFit, TBResult
+from stellar_predictor.patterns.titius_bode import TBResult, TitiusBodeFit
 
 try:
     from config.settings import (
-        RESONANCES,
+        CROSS_GAP_MAX_BOOST,
+        CROSS_GAP_REL_ERR_TOLERANCE,
+        MULTI_PLANET_MIN_STEPS,
+        OUTER_EDGE_MIN_R2,
+        OUTER_EDGE_STEPS,
+        RESONANCE_BASE_WEIGHT,
+        RESONANCE_PULL_FRACTION,
         RESONANCE_SCORE_WEIGHT,
         RESONANCE_TOLERANCE,
-        OUTER_EDGE_STEPS,
-        OUTER_EDGE_MIN_R2,
-        MULTI_PLANET_MIN_STEPS,
-        TB_BASE_WEIGHT,
+        RESONANCES,
         STABILITY_BASE_WEIGHT,
-        RESONANCE_BASE_WEIGHT,
+        STABILITY_SIGMOID_SCALE,
+        SYSTEM_LOGISTIC_OFFSET,
+        TB_BASE_WEIGHT,
+        TB_RATIO_EXCESS_THRESHOLD,
     )
 except ImportError:  # standalone fallback
     RESONANCES = [(2, 1), (3, 2), (4, 3), (5, 3), (5, 4), (3, 1), (5, 2), (7, 3)]
@@ -48,6 +53,12 @@ except ImportError:  # standalone fallback
     TB_BASE_WEIGHT = 0.50
     STABILITY_BASE_WEIGHT = 0.40
     RESONANCE_BASE_WEIGHT = 0.10
+    TB_RATIO_EXCESS_THRESHOLD = 1.15
+    STABILITY_SIGMOID_SCALE = 2.5
+    RESONANCE_PULL_FRACTION = 0.30
+    CROSS_GAP_MAX_BOOST = 0.15
+    CROSS_GAP_REL_ERR_TOLERANCE = 0.20
+    SYSTEM_LOGISTIC_OFFSET = 0.15
 
 
 @dataclass
@@ -55,7 +66,7 @@ class PredictionResult:
     """Complete prediction for a stellar system."""
     system_name: str
     num_known_planets: int
-    tb_fit: Optional[TBResult] = None
+    tb_fit: TBResult | None = None
     stability_regions: list[StabilityRegion] = field(default_factory=list)
     predicted_gaps: list[GapResult] = field(default_factory=list)
     execution_time_s: float = 0.0
@@ -133,7 +144,7 @@ class GapPredictor:
         if predicted_gaps:
             for g in predicted_gaps:
                 # Logistic: x/(x+0.15) maps 0.15->0.50, 0.30->0.67, 0.50->0.77, 0.90->0.86
-                g.combined_score = round(min(1.0, g.combined_score / (g.combined_score + 0.15)), 3)
+                g.combined_score = round(min(1.0, g.combined_score / (g.combined_score + SYSTEM_LOGISTIC_OFFSET)), 3)
 
         # Sort by combined score descending
         predicted_gaps.sort(key=lambda g: g.combined_score, reverse=True)
@@ -188,25 +199,71 @@ class GapPredictor:
         """
         if gap_ratio < 1.0:
             return 0.0
-        return max(0.0, 2.0 / (1.0 + math.exp(-gap_ratio / 2.5)) - 1.0)
+        return max(0.0, 2.0 / (1.0 + math.exp(-gap_ratio / STABILITY_SIGMOID_SCALE)) - 1.0)
 
-    def _compute_dynamic_weights(self, tb_result: Optional[TBResult]
-                                  ) -> tuple[float, float, float]:
-        """Compute dynamic scoring weights based on TB fit quality."""
+    def _detect_resonance_chain(self, axes: list[float]) -> float:
+        """Fraction [0, 1] of adjacent pairs sitting near a low-order MMR.
+
+        Resonant chains (e.g. TRAPPIST-1) have most adjacent period ratios
+        clustered on low-order commensurabilities; classic Titius-Bode
+        systems (Solar System, Kepler-33) do not. This gates how strongly
+        resonance influences the predicted position and score: meaningful
+        in chains, noise otherwise.
+        """
+        if len(axes) < 3:
+            return 0.0
+        near = 0
+        total = 0
+        for i in range(len(axes) - 1):
+            if axes[i] <= 0:
+                continue
+            period_ratio = (axes[i + 1] / axes[i]) ** 1.5
+            total += 1
+            for p, q in RESONANCES:
+                if q < p:
+                    rel = abs(period_ratio - p / q) / (p / q)
+                    if rel < 2.0 * RESONANCE_TOLERANCE:
+                        near += 1
+                        break
+        return near / total if total else 0.0
+
+    def _tb_confidence(self, tb_result: TBResult | None) -> float:
+        """Confidence [0, 1] that the TB position estimate is trustworthy.
+
+        Combines in-sample R^2 with LOOCV generalisation: a fit that
+        generalises poorly (high LOOCV RMSE in log-a) is down-weighted so
+        stability/resonance corrections take over.
+        """
+        if tb_result is None or tb_result.r_squared < 0.5:
+            return 0.0
+        conf = max(0.0, min(1.0, tb_result.r_squared))
+        if tb_result.loocv_rmse > 0:
+            conf /= (1.0 + 2.0 * tb_result.loocv_rmse)
+        return conf
+
+    def _compute_dynamic_weights(self, tb_result: TBResult | None,
+                                 chain_strength: float = 0.0
+                                 ) -> tuple[float, float, float]:
+        """Compute dynamic scoring weights based on TB fit quality.
+
+        Resonance weight scales with ``chain_strength``: halved for
+        non-resonant systems, up to ~2x for strong resonant chains.
+        """
+        chain_factor = 0.5 + 1.5 * chain_strength
         if tb_result is not None and tb_result.r_squared >= 0.5:
             tb_conf = max(0.3, min(0.99, tb_result.r_squared))
             tb_w = TB_BASE_WEIGHT * tb_conf
             stab_w = STABILITY_BASE_WEIGHT * (1.0 + 0.25 * (1.0 - tb_conf))
-            res_w = RESONANCE_BASE_WEIGHT * tb_conf
+            res_w = RESONANCE_BASE_WEIGHT * tb_conf * chain_factor
         else:
-            tb_w, stab_w, res_w = 0.0, 0.85, 0.15
+            tb_w, stab_w, res_w = 0.0, 0.85, 0.15 * chain_factor
         return tb_w, stab_w, res_w
 
     def _cross_reference(self, axes: list[float], names: list[str],
-                         tb_result: Optional[TBResult],
+                         tb_result: TBResult | None,
                          stability_regions: list[StabilityRegion],
                          planet_data: list[tuple[str, float, float]],
-                         eccs: Optional[list[float]] = None
+                         eccs: list[float] | None = None
                          ) -> list[GapResult]:
         """Cross-reference TB gaps with stability regions to produce scored gaps.
 
@@ -229,8 +286,16 @@ class GapPredictor:
         if tb_result is not None and tb_result.residuals:
             tb_sigma = float(np.std(tb_result.residuals))
 
-        # Dynamic weights based on fit quality
-        tb_w, stab_w, res_w = self._compute_dynamic_weights(tb_result)
+        # Resonance-chain strength gates how much resonance influences
+        # position and score (meaningful in chains, noise in TB systems).
+        chain_strength = self._detect_resonance_chain(axes)
+
+        # Dynamic weights based on fit quality + chain strength
+        tb_w, stab_w, res_w = self._compute_dynamic_weights(
+            tb_result, chain_strength)
+
+        # Confidence in the TB position estimate (anchors the prediction)
+        tb_conf = self._tb_confidence(tb_result)
 
         masses_sun = [m for _, _, m in planet_data]
 
@@ -242,30 +307,52 @@ class GapPredictor:
             outer_name = names[i + 1]
 
             tb_score = 0.0
-            predicted_a = (inner_a * outer_a) ** 0.5  # geometric mean default
+            # Eccentricity-aware geometric mean: anchor between inner
+            # apoapsis and outer periapsis. Reduces to sqrt(a_in*a_out)
+            # for circular orbits, which is the exact position of a hidden
+            # body in an equal-ratio (Titius-Bode) chain.
+            e_in = max(0.0, eccs[i])
+            e_out = max(0.0, eccs[i + 1])
+            eff_inner = inner_a * (1.0 + e_in)
+            eff_outer = outer_a * (1.0 - e_out)
+            if eff_outer > eff_inner > 0:
+                geom_anchor = (eff_inner * eff_outer) ** 0.5
+            else:
+                geom_anchor = (inner_a * outer_a) ** 0.5
+            predicted_a = geom_anchor
+            tb_anchor = None  # TB index-level prediction when available
 
             if tb_result is not None and tb_result.r_squared >= 0.5:
                 expected_ratio = tb_result.beta
                 actual_ratio = outer_a / inner_a if inner_a > 0 else float("inf")
                 ratio_excess = actual_ratio / max(expected_ratio, 1.01)
 
-                if ratio_excess > 1.15:
+                if ratio_excess > TB_RATIO_EXCESS_THRESHOLD:
                     # Scale: excess=1.15 → 0.3, excess=3.0 → 0.9
                     tb_score = min(0.9, 0.3 + 0.4 * (ratio_excess - 1.0))
-                    predicted_a = (inner_a * outer_a) ** 0.5
 
                 # Check TB gap match for index-level prediction
                 tb_gaps = self._tb_fitter.score_gaps(tb_result, axes, names)
                 for tg in tb_gaps:
                     if (tg.inner_planet == inner_name and
                             tg.outer_planet == outer_name):
-                        predicted_a = tg.predicted_a
+                        tb_anchor = tg.predicted_a
                         tb_score = max(tb_score, 0.7)
-                        if inner_a < predicted_a < outer_a:
+                        if inner_a < tb_anchor < outer_a:
                             tb_score = max(tb_score, 0.9)
                         break
             else:
                 tb_score = 0.3
+
+            # ---- Position anchor: blend the TB index prediction with the
+            # eccentricity-aware geometric mean by TB confidence. A trusted
+            # TB fit dominates; otherwise the geometric mean carries the
+            # estimate. (Previously the stability-band arithmetic center
+            # unconditionally overwrote this, biasing predictions outward.)
+            if tb_anchor is not None and inner_a < tb_anchor < outer_a:
+                predicted_a = tb_conf * tb_anchor + (1.0 - tb_conf) * geom_anchor
+            else:
+                predicted_a = geom_anchor
 
             # Stability score — sigmoid-based
             stability_score = 0.0
@@ -279,31 +366,38 @@ class GapPredictor:
                     stability_score = self._stability_score_sigmoid(sr.gap_ratio)
                     mass_range = self._stability.allowed_mass_range(sr)
 
-                    # Resonance-aware predicted_a bias (v0.4)
+                    # Gentle corrections to the anchor, scaled by (1 - tb_conf)
+                    # so a trusted TB position is never overwritten. The
+                    # resonance pull is further gated by resonance-chain
+                    # membership (noise in non-resonant TB systems).
                     if sr.width_au > 0:
-                        center = (sr.inner_boundary_au + sr.outer_boundary_au) / 2.0
-                        # Find resonance positions in the gap and pull toward
-                        # the one closest to the current predicted_a
-                        nearest_res = None
-                        nearest_dist = float("inf")
-                        for p, q in RESONANCES:
-                            ratio = (p / q) ** (2.0 / 3.0)
-                            for a_res in (inner_a * ratio, outer_a / ratio):
-                                if sr.inner_boundary_au < a_res < sr.outer_boundary_au:
-                                    dist = abs(a_res - predicted_a)
-                                    if dist < nearest_dist:
-                                        nearest_dist = dist
-                                        nearest_res = a_res
-                        if nearest_res is not None:
-                            # Pull gently (0.3) toward nearest resonance
-                            preferred = predicted_a + (nearest_res - predicted_a) * 0.3
-                        else:
-                            preferred = center
-                        preferred = max(sr.inner_boundary_au + 0.1 * sr.width_au,
-                                        min(sr.outer_boundary_au - 0.1 * sr.width_au,
-                                            preferred))
-                        if inner_a < preferred < outer_a:
-                            predicted_a = preferred
+                        correction_room = 1.0 - tb_conf
+
+                        # (a) Resonance pull — only meaningful in chains
+                        if chain_strength > 0.0 and correction_room > 0.0:
+                            nearest_res = None
+                            nearest_dist = float("inf")
+                            for p, q in RESONANCES:
+                                ratio = (p / q) ** (2.0 / 3.0)
+                                for a_res in (inner_a * ratio, outer_a / ratio):
+                                    if sr.inner_boundary_au < a_res < sr.outer_boundary_au:
+                                        dist = abs(a_res - predicted_a)
+                                        if dist < nearest_dist:
+                                            nearest_dist = dist
+                                            nearest_res = a_res
+                            if nearest_res is not None:
+                                pull = RESONANCE_PULL_FRACTION * chain_strength * correction_room
+                                predicted_a += (nearest_res - predicted_a) * pull
+
+                        # (b) Clamp into the stable band; if the anchor
+                        # escaped it entirely, fall back to the geometric
+                        # (not arithmetic) center of the band.
+                        lo_band = sr.inner_boundary_au + 0.1 * sr.width_au
+                        hi_band = sr.outer_boundary_au - 0.1 * sr.width_au
+                        if 0 < lo_band < hi_band and not (lo_band <= predicted_a <= hi_band):
+                            geom_center = (sr.inner_boundary_au
+                                           * sr.outer_boundary_au) ** 0.5
+                            predicted_a = min(hi_band, max(lo_band, geom_center))
 
                     predicted_a_lower = max(predicted_a_lower, sr.inner_boundary_au)
                     predicted_a_upper = min(predicted_a_upper, sr.outer_boundary_au)
@@ -401,84 +495,111 @@ class GapPredictor:
             gaps.extend(sub_gaps_for_this_pair)
 
         # ---- Pass 1b: Outer-edge prediction (beyond last known planet) ----
-        if tb_result is not None and tb_result.r_squared >= OUTER_EDGE_MIN_R2:
-            outer_a = axes[-1]
-            outer_name = names[-1]
-            last_idx = tb_result.index_map.get(names[-1],
-                                               tb_result.start_index + n - 1)
-            for edge_step in range(1, OUTER_EDGE_STEPS + 1):
-                pred_index = last_idx + edge_step
-                predicted_a = tb_result.alpha * (tb_result.beta ** pred_index)
-                if predicted_a > 500:  # sanity cap — beyond ~500 AU is noise
-                    break
-
-                # TB score: moderate, based on fit quality
-                edge_tb_score = min(0.7, 0.3 + 0.4 * (tb_result.r_squared - 0.5))
-
-                # Stability score: Hill radius separation from last known planet
-                last_mass = masses_sun[-1] if masses_sun else 1e-6
-                r_h_last = outer_a * (last_mass / (3.0 * self.stellar_mass)) ** (1.0 / 3.0)
-                sep = (predicted_a - outer_a) / max(
-                    (outer_a + predicted_a) / 2.0 * ((last_mass + 1e-8) / (3.0 * self.stellar_mass)) ** (1.0 / 3.0),
-                    1e-12)
-                edge_stab = self._stability_score_sigmoid(
-                    sep / max(self._stability.critical_sep, 1.0) * 3.0)
-
-                # Mass prior: wider for outer systems
-                edge_mass_range = (0.5, min(500.0, 15.0 * (predicted_a / outer_a)))
-
-                e_w = tb_w + stab_w + res_w
-                e_combined = (tb_w * edge_tb_score + stab_w * edge_stab) / max(e_w, 1e-9)
-
-                gaps.append(GapResult(
-                    inner_a=outer_a,
-                    outer_a=predicted_a * 1.3,
-                    predicted_a=round(predicted_a, 4),
-                    predicted_period=round(predicted_a ** 1.5, 2),
-                    titius_bode_score=round(edge_tb_score, 3),
-                    stability_score=round(edge_stab, 3),
-                    combined_score=round(e_combined, 3),
-                    estimated_mass_range=edge_mass_range,
-                    method="tb_extrapolation+stability_edge",
-                    inner_planet=outer_name,
-                    outer_planet=f"(outer edge +{edge_step})",
-                    predicted_a_lower=round(max(outer_a * 1.05, predicted_a * 0.8), 4),
-                    predicted_a_upper=round(predicted_a * 1.2, 4),
-                    predicted_eccentricity=round(eccs[-1], 4) if eccs else 0.0,
-                    resonance_score=0.0,
-                ))
+        self._predict_outer_edge(
+            gaps, axes, names, tb_result, masses_sun, eccs,
+            tb_w, stab_w, res_w,
+        )
 
         # ---- Pass 2: cross-gap consistency (amplitude-modulated) ----
-        if tb_result is not None and tb_result.r_squared >= 0.5:
-            beta = tb_result.beta
-            for i in range(len(gaps)):
-                for j in range(i + 2, min(i + 4, len(gaps))):
-                    inner_a = gaps[i].inner_a
-                    outer_a = gaps[j].outer_a
-                    if inner_a > 0:
-                        steps = j - i + 1
-                        expected_step_ratio = beta ** steps
-                        actual_span = outer_a / inner_a
-                        # Relative error in TB consistency
-                        rel_err = abs(actual_span - expected_step_ratio) / max(expected_step_ratio, 1.01)
-
-                        if rel_err < 0.20:
-                            # Amplitude-modulated boost: better match = higher boost
-                            boost = 0.15 * max(0.0, 1.0 - rel_err * 5.0)
-                            # Modulate by gap quality
-                            avg_quality = (gaps[i].combined_score + gaps[j].combined_score) / 2.0
-                            quality_factor = 0.5 + 0.5 * avg_quality
-                            boost *= quality_factor
-                            gaps[i].combined_score = round(
-                                min(1.0, gaps[i].combined_score + boost), 3)
-                            gaps[j].combined_score = round(
-                                min(1.0, gaps[j].combined_score + boost), 3)
+        self._apply_cross_gap_consistency(gaps, tb_result)
 
         return gaps
 
+    def _predict_outer_edge(self, gaps: list[GapResult], axes: list[float],
+                            names: list[str], tb_result: TBResult | None,
+                            masses_sun: list[float], eccs: list[float],
+                            tb_w: float, stab_w: float, res_w: float) -> None:
+        """Append TB-extrapolated predictions beyond the outermost planet.
+
+        Mutates ``gaps`` in place. Only runs when the TB fit is good enough
+        (``OUTER_EDGE_MIN_R2``); steps out to ``OUTER_EDGE_STEPS`` slots,
+        stopping at a 500 AU sanity cap.
+        """
+        if tb_result is None or tb_result.r_squared < OUTER_EDGE_MIN_R2:
+            return
+        n = len(axes)
+        outer_a = axes[-1]
+        outer_name = names[-1]
+        last_idx = tb_result.index_map.get(names[-1],
+                                           tb_result.start_index + n - 1)
+        for edge_step in range(1, OUTER_EDGE_STEPS + 1):
+            pred_index = last_idx + edge_step
+            predicted_a = tb_result.alpha * (tb_result.beta ** pred_index)
+            if predicted_a > 500:  # sanity cap — beyond ~500 AU is noise
+                break
+
+            # TB score: moderate, based on fit quality
+            edge_tb_score = min(0.7, 0.3 + 0.4 * (tb_result.r_squared - 0.5))
+
+            # Stability score: Hill radius separation from last known planet
+            last_mass = masses_sun[-1] if masses_sun else 1e-6
+            sep = (predicted_a - outer_a) / max(
+                (outer_a + predicted_a) / 2.0 * ((last_mass + 1e-8) / (3.0 * self.stellar_mass)) ** (1.0 / 3.0),
+                1e-12)
+            edge_stab = self._stability_score_sigmoid(
+                sep / max(self._stability.critical_sep, 1.0) * 3.0)
+
+            # Mass prior: wider for outer systems
+            edge_mass_range = (0.5, min(500.0, 15.0 * (predicted_a / outer_a)))
+
+            e_w = tb_w + stab_w + res_w
+            e_combined = (tb_w * edge_tb_score + stab_w * edge_stab) / max(e_w, 1e-9)
+
+            gaps.append(GapResult(
+                inner_a=outer_a,
+                outer_a=predicted_a * 1.3,
+                predicted_a=round(predicted_a, 4),
+                predicted_period=round(predicted_a ** 1.5, 2),
+                titius_bode_score=round(edge_tb_score, 3),
+                stability_score=round(edge_stab, 3),
+                combined_score=round(e_combined, 3),
+                estimated_mass_range=edge_mass_range,
+                method="tb_extrapolation+stability_edge",
+                inner_planet=outer_name,
+                outer_planet=f"(outer edge +{edge_step})",
+                predicted_a_lower=round(max(outer_a * 1.05, predicted_a * 0.8), 4),
+                predicted_a_upper=round(predicted_a * 1.2, 4),
+                predicted_eccentricity=round(eccs[-1], 4) if eccs else 0.0,
+                resonance_score=0.0,
+            ))
+
+    def _apply_cross_gap_consistency(self, gaps: list[GapResult],
+                                     tb_result: TBResult | None) -> None:
+        """Boost gaps whose multi-step spans are TB-consistent.
+
+        Mutates ``gaps[*].combined_score`` in place. A span of ``steps`` gaps
+        that matches ``beta**steps`` (within 20%) earns an amplitude-modulated
+        boost scaled by the two endpoints' quality.
+        """
+        if tb_result is None or tb_result.r_squared < 0.5:
+            return
+        beta = tb_result.beta
+        for i in range(len(gaps)):
+            for j in range(i + 2, min(i + 4, len(gaps))):
+                inner_a = gaps[i].inner_a
+                outer_a = gaps[j].outer_a
+                if inner_a > 0:
+                    steps = j - i + 1
+                    expected_step_ratio = beta ** steps
+                    actual_span = outer_a / inner_a
+                    # Relative error in TB consistency
+                    rel_err = abs(actual_span - expected_step_ratio) / max(expected_step_ratio, 1.01)
+
+                    if rel_err < CROSS_GAP_REL_ERR_TOLERANCE:
+                        # Amplitude-modulated boost: better match = higher boost
+                        boost = CROSS_GAP_MAX_BOOST * max(0.0, 1.0 - rel_err * 5.0)
+                        # Modulate by gap quality
+                        avg_quality = (gaps[i].combined_score + gaps[j].combined_score) / 2.0
+                        quality_factor = 0.5 + 0.5 * avg_quality
+                        boost *= quality_factor
+                        gaps[i].combined_score = round(
+                            min(1.0, gaps[i].combined_score + boost), 3)
+                        gaps[j].combined_score = round(
+                            min(1.0, gaps[j].combined_score + boost), 3)
+
     @staticmethod
     def _get_system_name(system) -> str:
-        if isinstance(system, (StellarSystem, ExoplanetSystem)):
+        if isinstance(system, StellarSystem | ExoplanetSystem):
             return system.name
         if isinstance(system, str):
             return system

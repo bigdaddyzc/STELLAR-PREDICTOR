@@ -1,6 +1,5 @@
 """Tests for Titius-Bode fitting."""
 
-import pytest
 from stellar_predictor.patterns.titius_bode import TitiusBodeFit
 
 
@@ -22,6 +21,7 @@ class TestTitiusBodeFit:
     def test_gap_detection(self):
         """Removing a planet should create a detectable large gap."""
         import numpy as np
+
         from stellar_predictor.data.models import CelestialBody, OrbitalElements, StellarSystem
         from stellar_predictor.patterns.predictor import GapPredictor
 

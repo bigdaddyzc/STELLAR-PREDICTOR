@@ -13,11 +13,12 @@ v0.3 improvements:
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from itertools import combinations_with_replacement
 
 import numpy as np
-from scipy.optimize import curve_fit
+from scipy.optimize import OptimizeWarning, curve_fit
 
 try:
     from config.settings import TB_MAX_SKIPS, TB_SKIP_MIN_R2_GAIN
@@ -236,12 +237,17 @@ class TitiusBodeFit:
         for start in range(min(5, n_planets)):
             indices = np.arange(start, start + n_planets, dtype=float)
             try:
-                popt, _ = curve_fit(
-                    classical, indices, axes,
-                    p0=[0.4, 0.3, 1.7],
-                    bounds=([0, 0, 0.5], [5, 10, 3.0]),
-                    maxfev=5000,
-                )
+                # Covariance is irrelevant here (we only use the fitted
+                # params), and a tight/degenerate fit raises OptimizeWarning
+                # we deliberately ignore.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", OptimizeWarning)
+                    popt, _ = curve_fit(
+                        classical, indices, axes,
+                        p0=[0.4, 0.3, 1.7],
+                        bounds=([0, 0, 0.5], [5, 10, 3.0]),
+                        maxfev=5000,
+                    )
                 predicted = classical(indices, *popt)
                 ss_res = np.sum((axes - predicted) ** 2)
                 ss_tot = np.sum((axes - np.mean(axes)) ** 2)

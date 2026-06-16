@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 import rebound
 
@@ -74,7 +72,6 @@ class NBodySimulator:
             SimulationResult with time series of positions and velocities
         """
         times = np.linspace(t_start, t_end, n_steps)
-        n_bodies = len(self._body_names)
 
         positions = {name: np.zeros((n_steps, 3)) for name in self._body_names}
         velocities = {name: np.zeros((n_steps, 3)) for name in self._body_names}
@@ -121,7 +118,7 @@ class NBodySimulator:
         """Get total energy of the system (for conservation checks)."""
         return self.sim.energy()
 
-    def clone(self) -> "NBodySimulator":
+    def clone(self) -> NBodySimulator:
         """Create a copy of this simulator at its current state."""
         new = object.__new__(NBodySimulator)
         new.sim = self.sim.copy()

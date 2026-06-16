@@ -1,11 +1,9 @@
 """Tests for Kepler equation solver and orbital element conversions."""
 
 import numpy as np
-import pytest
 
 from stellar_predictor.physics.kepler import (
     cartesian_to_orbital_elements,
-    eccentric_to_true_anomaly,
     kepler_solve,
     orbital_elements_to_cartesian,
 )

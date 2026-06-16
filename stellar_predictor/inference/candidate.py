@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 
@@ -24,8 +23,8 @@ class CandidateBody:
     confidence: float  # 0-1 detection confidence
     method: str  # which detection method produced this
 
-    longitude_ascending: Optional[tuple[float, float, float]] = None
-    argument_perihelion: Optional[tuple[float, float, float]] = None
+    longitude_ascending: tuple[float, float, float] | None = None
+    argument_perihelion: tuple[float, float, float] | None = None
 
     @property
     def mass_earth(self) -> float:

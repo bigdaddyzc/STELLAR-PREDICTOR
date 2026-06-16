@@ -6,18 +6,16 @@ connection handling with retries and local caching.
 
 from __future__ import annotations
 
+import calendar
 import hashlib
 import json
-import os
-import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import requests
 
-from stellar_predictor.data.models import CelestialBody, OrbitalElements, StellarSystem
+from stellar_predictor.data.models import CelestialBody, StellarSystem
 
 # JPL Horizons IDs
 HORIZONS_IDS = {
@@ -47,7 +45,6 @@ SOLAR_SYSTEM_MASSES = {
 }
 
 CACHE_DIR = Path("data/cache/jpl")
-import calendar
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -71,7 +68,6 @@ def _to_jpl_date(iso_date: str) -> str:
 
 def _advance_date(jpl_date: str, days: int) -> str:
     """Advance a JPL-format date by N days."""
-    from datetime import datetime, timedelta
     # Try parsing JPL format "YYYY-Mon-DD"
     try:
         dt = datetime.strptime(jpl_date, "%Y-%b-%d")
@@ -102,7 +98,7 @@ class JPLClient:
             return cache_file.read_text()
 
         last_error = None
-        for attempt in range(self.max_retries):
+        for _attempt in range(self.max_retries):
             try:
                 resp = self.session.get(
                     JPL_API, params=params, timeout=self.timeout
@@ -110,7 +106,7 @@ class JPLClient:
                 resp.raise_for_status()
                 text = resp.text
                 if "Bad dates" in text or "start must be earlier" in text:
-                    raise ValueError(f"JPL date error (try different date format)")
+                    raise ValueError("JPL date error (try different date format)")
                 cache_file.write_text(text)
                 return text
             except (requests.Timeout, requests.ConnectionError) as e:
@@ -251,7 +247,7 @@ class JPLClient:
 
     def fetch_system_state(
         self,
-        bodies: Optional[list[str]] = None,
+        bodies: list[str] | None = None,
         epoch_date: str = "2000-Jan-01",
     ) -> StellarSystem:
         """Build a StellarSystem from JPL state vectors at a given epoch.

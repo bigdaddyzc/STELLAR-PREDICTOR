@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -13,11 +11,11 @@ from stellar_predictor.inference.candidate import CandidateBody
 
 def plot_system_orbits(
     system: StellarSystem,
-    simulation: Optional[SimulationResult] = None,
-    candidates: Optional[list[CandidateBody]] = None,
+    simulation: SimulationResult | None = None,
+    candidates: list[CandidateBody] | None = None,
     projection: str = "2d",
     figsize: tuple[float, float] = (10, 10),
-    title: Optional[str] = None,
+    title: str | None = None,
 ) -> plt.Figure:
     """Plot orbital paths of a stellar system.
 

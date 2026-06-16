@@ -1,9 +1,13 @@
 """Tests for GapPredictor."""
 
 import numpy as np
-import pytest
 
-from stellar_predictor.data.models import CelestialBody, ExoplanetSystem, OrbitalElements, StellarSystem
+from stellar_predictor.data.models import (
+    CelestialBody,
+    ExoplanetSystem,
+    OrbitalElements,
+    StellarSystem,
+)
 from stellar_predictor.patterns.predictor import GapPredictor
 
 
@@ -94,3 +98,53 @@ class TestGapPredictor:
         predictor = GapPredictor(stellar_mass=1.0)
         result = predictor.predict(_build_solar_system())
         assert result.execution_time_s < 1.0
+
+
+class TestPositionAnchoring:
+    """v0.6: confidence-weighted position anchoring and chain detection."""
+
+    def test_resonance_chain_detection(self):
+        """TRAPPIST-1-like equal-ratio chains score high; TB systems low."""
+        predictor = GapPredictor(stellar_mass=1.0)
+        # TRAPPIST-1 semi-major axes — a resonant chain
+        trappist = [0.01154, 0.01580, 0.02227, 0.02925, 0.03849,
+                    0.04683, 0.06189]
+        chain = predictor._detect_resonance_chain(trappist)
+        # Solar System — not a resonant chain
+        solar = [0.3871, 0.7233, 1.0, 1.5237, 5.2034, 9.5371, 19.19, 30.07]
+        non_chain = predictor._detect_resonance_chain(solar)
+        assert chain > non_chain
+        assert chain >= 0.5
+
+    def test_no_outward_bias_equal_ratio(self):
+        """For a clean geometric chain with a hidden middle planet, the
+        prediction must land near the geometric mean, not biased outward."""
+        # Equal-ratio system a_n = 1.0 * 1.6^n, hide the n=2 planet (a=2.56)
+        tuples = [
+            ("p0", 1.0, 1e-5, 0.0),
+            ("p1", 1.6, 1e-5, 0.0),
+            # p2 at 2.56 hidden
+            ("p3", 4.096, 1e-5, 0.0),
+            ("p4", 6.5536, 1e-5, 0.0),
+            ("p5", 10.486, 1e-5, 0.0),
+        ]
+        predictor = GapPredictor(stellar_mass=1.0)
+        result = predictor.predict(tuples)
+        # Find the gap between p1 and p3
+        gap = next(g for g in result.predicted_gaps
+                   if g.inner_planet == "p1" and g.outer_planet == "p3")
+        # True hidden position is 2.56; allow 10% tolerance
+        assert abs(gap.predicted_a - 2.56) / 2.56 < 0.10
+
+    def test_tb_confidence_monotonic(self):
+        """Higher R^2 (and lower LOOCV) yields higher TB confidence."""
+        from stellar_predictor.patterns.titius_bode import TBResult
+        predictor = GapPredictor(stellar_mass=1.0)
+        strong = TBResult(alpha=1.0, beta=1.6, r_squared=0.98,
+                          predicted_axes=[], residuals=[], index_map={},
+                          loocv_rmse=0.02)
+        weak = TBResult(alpha=1.0, beta=1.6, r_squared=0.55,
+                        predicted_axes=[], residuals=[], index_map={},
+                        loocv_rmse=0.30)
+        assert predictor._tb_confidence(strong) > predictor._tb_confidence(weak)
+        assert predictor._tb_confidence(None) == 0.0

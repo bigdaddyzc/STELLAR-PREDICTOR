@@ -1,4 +1,4 @@
-from .orbit_plot import plot_system_orbits, plot_residuals
+from .orbit_plot import plot_residuals, plot_system_orbits
 from .plotly_viz import (
     comparison_data,
     orbit_plot_3d,

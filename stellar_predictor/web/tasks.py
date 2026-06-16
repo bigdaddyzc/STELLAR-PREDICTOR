@@ -6,31 +6,32 @@ import asyncio
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
-import numpy as np
-
-from stellar_predictor.prediction.pipeline import PredictionPipeline
-from stellar_predictor.data.models import CelestialBody, OrbitalElements, StellarSystem, ExoplanetSystem
-from stellar_predictor.physics import NBodySimulator
-from stellar_predictor.physics.properties import planet_from_mass
+from stellar_predictor.data.known_systems import (
+    STELLAR_INFO,
+)
+from stellar_predictor.data.known_systems import (
+    build_system as _build_known_system,
+)
 from stellar_predictor.patterns.reliability import filter_gaps, filter_summary
+from stellar_predictor.physics.properties import planet_from_mass
+from stellar_predictor.prediction.pipeline import PredictionPipeline
 from stellar_predictor.visualization.plotly_viz import (
+    spacing_stability_plot,
     system_distribution_plot,
     titius_bode_plot,
-    spacing_stability_plot,
 )
 from stellar_predictor.web.schemas import AnalysisRequest
 
 try:
     from config.settings import (
-        RELIABILITY_MIN_COMBINED_SCORE,
-        RELIABILITY_REQUIRE_SUPPORTING_SIGNAL,
         RELIABILITY_MAX_MASS_RATIO,
         RELIABILITY_MAX_MASS_UPPER,
-        RELIABILITY_OUTER_EDGE_STABILITY_CHECK,
+        RELIABILITY_MIN_COMBINED_SCORE,
         RELIABILITY_OUTER_EDGE_MAX_SCORE,
+        RELIABILITY_OUTER_EDGE_STABILITY_CHECK,
+        RELIABILITY_REQUIRE_SUPPORTING_SIGNAL,
         RELIABILITY_SUB_GAP_MIN_STABILITY,
     )
 except ImportError:
@@ -53,71 +54,17 @@ _RELIABILITY_CONFIG = {
     "sub_gap_min_stability": RELIABILITY_SUB_GAP_MIN_STABILITY,
 }
 
-SOLAR_SYSTEM_PLANETS = [
-    ("Mercury", 1.66012e-7, 0.3871, 0.2056, 0.1222, 0.8436, 0.5088, 4.4026),
-    ("Venus", 2.44783e-6, 0.7233, 0.0068, 0.0592, 1.3383, 0.9577, 3.1761),
-    ("Earth", 3.00273e-6, 1.0000, 0.0167, 0.0000, -0.1965, 1.7968, 6.2400),
-    ("Mars", 3.22715e-7, 1.5237, 0.0934, 0.0323, 0.8653, -1.1951, 0.3381),
-    ("Jupiter", 9.54786e-4, 5.2034, 0.0484, 0.0227, 1.7534, 0.2389, 0.3411),
-    ("Saturn", 2.85837e-4, 9.5371, 0.0542, 0.0434, 1.9847, 1.6130, 5.5647),
-    ("Uranus", 4.36624e-5, 19.1913, 0.0472, 0.0135, 1.2956, 1.6929, 2.4844),
-    ("Neptune", 5.15138e-5, 30.0690, 0.0086, 0.0309, 2.2999, -1.4869, 4.4715),
-]
-
-# Stellar properties for each system (for report generation)
-STELLAR_INFO = {
-    "solar_system": {"mass": 1.0, "radius": 1.0, "teff": 5778.0},
-    "trappist1": {"mass": 0.089, "radius": 0.119, "teff": 2566.0},
-    "kepler11": {"mass": 0.96, "radius": 1.06, "teff": 5663.0},
-    "kepler33": {"mass": 1.26, "radius": 1.58, "teff": 5904.0},
-    "hd219134": {"mass": 0.81, "radius": 0.778, "teff": 4699.0},
-}
-
-EXOPLANET_DATA: dict[str, tuple] = {
-    "trappist1": (0.089, [
-        ("TRAPPIST-1 b", 1.374, 0.01154, 0.006),
-        ("TRAPPIST-1 c", 1.308, 0.01580, 0.006),
-        ("TRAPPIST-1 d", 0.388, 0.02227, 0.008),
-        ("TRAPPIST-1 e", 0.692, 0.02925, 0.005),
-        ("TRAPPIST-1 f", 1.039, 0.03849, 0.010),
-        ("TRAPPIST-1 g", 1.321, 0.04683, 0.002),
-        ("TRAPPIST-1 h", 0.326, 0.06189, 0.086),
-    ]),
-    "kepler11": (0.96, [
-        ("Kepler-11 b", 1.9, 0.091, 0.045),
-        ("Kepler-11 c", 2.9, 0.107, 0.026),
-        ("Kepler-11 d", 7.3, 0.155, 0.004),
-        ("Kepler-11 e", 8.0, 0.195, 0.012),
-        ("Kepler-11 f", 2.0, 0.250, 0.013),
-        ("Kepler-11 g", 0.95, 0.466, 0.15),
-    ]),
-    "kepler33": (1.26, [
-        ("Kepler-33 b", 0.16, 0.0677, 0.0),
-        ("Kepler-33 c", 0.29, 0.1189, 0.0),
-        ("Kepler-33 d", 0.48, 0.1662, 0.0),
-        ("Kepler-33 e", 0.36, 0.2138, 0.0),
-        ("Kepler-33 f", 0.40, 0.2535, 0.0),
-    ]),
-    "hd219134": (0.81, [
-        ("HD 219134 b", 4.74, 0.0388, 0.0),
-        ("HD 219134 c", 4.36, 0.0653, 0.062),
-        ("HD 219134 d", 16.17, 0.237, 0.138),
-        ("HD 219134 e", 70.90, 2.563, 0.34),
-    ]),
-}
-
-
 @dataclass
 class AnalysisTask:
     id: str
     status: str = "pending"
     progress: float = 0.0
     stage: str = ""
-    result: Optional[dict] = None
-    error: Optional[str] = None
-    distribution_plot_data: Optional[dict] = None
-    tb_plot_data: Optional[dict] = None
-    spacing_plot_data: Optional[dict] = None
+    result: dict | None = None
+    error: str | None = None
+    distribution_plot_data: dict | None = None
+    tb_plot_data: dict | None = None
+    spacing_plot_data: dict | None = None
 
 
 class TaskManager:
@@ -134,7 +81,7 @@ class TaskManager:
                loop: asyncio.AbstractEventLoop):
         loop.run_in_executor(self.executor, self._run_analysis, task_id, request)
 
-    def get_task(self, task_id: str) -> Optional[AnalysisTask]:
+    def get_task(self, task_id: str) -> AnalysisTask | None:
         return self.tasks.get(task_id)
 
     def _run_analysis(self, task_id: str, request: AnalysisRequest):
@@ -204,27 +151,8 @@ class TaskManager:
 # ---------------------------------------------------------------------------
 
 def _build_system(system_name: str):
-    if system_name == "solar_system":
-        system = StellarSystem(name="Solar System", source="J2000 orbital elements")
-        system.add_body(CelestialBody("Sun", 1.0, np.zeros(3), np.zeros(3)))
-        for name, mass, a, e, i, Om, om, M in SOLAR_SYSTEM_PLANETS:
-            system.add_body(CelestialBody(
-                name=name, mass=mass,
-                orbital_elements=OrbitalElements(a, e, i, Om, om, M),
-            ))
-        return system
-
-    if system_name in EXOPLANET_DATA:
-        star_mass, planets = EXOPLANET_DATA[system_name]
-        system = ExoplanetSystem(name=system_name, stellar_mass=star_mass)
-        for pname, mass, a, ecc in planets:
-            system.planets.append({
-                "name": pname, "a": a, "mass": mass,  # Earth masses (extract_planet_data_full converts to solar)
-                "eccentricity": ecc,
-            })
-        return system
-
-    return None
+    """Build a supported system by key (delegates to known_systems)."""
+    return _build_known_system(system_name)
 
 
 # ---------------------------------------------------------------------------
@@ -239,11 +167,14 @@ def _generate_prediction_report(result, system_name: str, stellar_mass: float,
     # Apply reliability filter (same config as _format_analysis_result)
     reliable_gaps_report, verdicts = filter_gaps(result.predicted_gaps, _RELIABILITY_CONFIG)
     filtered_count = len(result.predicted_gaps) - len(reliable_gaps_report)
+    # Map each reliable gap to its verdict (carries the graded score).
+    reliable_verdicts = [v for v in verdicts if v.is_reliable]
     planet_data = []
 
     for i, gap in enumerate(reliable_gaps_report):
         mass_low = gap.estimated_mass_range[0]
         mass_high = gap.estimated_mass_range[1]
+        verdict = reliable_verdicts[i] if i < len(reliable_verdicts) else None
 
         params = planet_from_mass(
             mass_earth_low=mass_low,
@@ -269,6 +200,9 @@ def _generate_prediction_report(result, system_name: str, stellar_mass: float,
             "inner_planet": inner_ref,
             "outer_planet": outer_ref,
             "combined_score": gap.combined_score,
+            "reliability_score": verdict.score if verdict else 0.0,
+            "reliability_grade": verdict.grade if verdict else "",
+            "reliability_components": verdict.components if verdict else {},
             "method": gap.method,
         })
 
@@ -321,9 +255,11 @@ def _format_analysis_result(result, report: dict | None = None) -> dict:
     # Apply reliability filter
     reliable_gaps, verdicts = filter_gaps(result.predicted_gaps, _RELIABILITY_CONFIG)
     filtered_verdicts = [v for v in verdicts if not v.is_reliable]
+    reliable_verdicts = [v for v in verdicts if v.is_reliable]
 
     gaps_data = []
     for i, g in enumerate(reliable_gaps):
+        verdict = reliable_verdicts[i] if i < len(reliable_verdicts) else None
         gaps_data.append({
             "index": i + 1,
             "inner_planet": g.inner_planet,
@@ -335,6 +271,8 @@ def _format_analysis_result(result, report: dict | None = None) -> dict:
             "titius_bode_score": g.titius_bode_score,
             "stability_score": g.stability_score,
             "combined_score": g.combined_score,
+            "reliability_score": verdict.score if verdict else 0.0,
+            "reliability_grade": verdict.grade if verdict else "",
             "estimated_mass_min": round(g.estimated_mass_range[0], 2),
             "estimated_mass_max": round(g.estimated_mass_range[1], 0),
             "method": g.method,

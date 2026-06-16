@@ -10,8 +10,8 @@ planet's periapsis.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -77,7 +77,7 @@ class StabilityAnalyzer:
         return (outer.a_au - inner.a_au) / r_h_mutual
 
     def find_stability_gaps(self, planets: list[tuple[str, float, float]],
-                            eccentricities: Optional[Sequence[float]] = None
+                            eccentricities: Sequence[float] | None = None
                             ) -> list[StabilityRegion]:
         """Find gaps where an additional planet could be stable.
 
@@ -166,7 +166,7 @@ class StabilityAnalyzer:
     @staticmethod
     def extract_planet_data_full(system) -> list[tuple[str, float, float, float]]:
         """Extract sorted (name, a, mass, eccentricity) from any system representation."""
-        from stellar_predictor.data.models import StellarSystem, ExoplanetSystem
+        from stellar_predictor.data.models import ExoplanetSystem, StellarSystem
 
         if isinstance(system, StellarSystem):
             data = []
@@ -188,7 +188,8 @@ class StabilityAnalyzer:
                 a = p.get("a")
                 mass = p.get("mass", 0.0)
                 name = p.get("name", "?")
-                ecc = p.get("e", 0.0) or 0.0
+                # Accept both "eccentricity" (canonical) and legacy "e" key.
+                ecc = p.get("eccentricity", p.get("e", 0.0)) or 0.0
                 if a is not None and a > 0:
                     mass_solar = mass / 332946.0 if mass > 0 else 1e-6
                     data.append((name, float(a), float(mass_solar), float(ecc)))

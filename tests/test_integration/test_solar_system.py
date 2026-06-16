@@ -1,7 +1,6 @@
 """Integration test: Solar System pattern analysis."""
 
 import numpy as np
-import pytest
 
 from stellar_predictor.data.models import CelestialBody, OrbitalElements, StellarSystem
 from stellar_predictor.prediction.pipeline import PredictionPipeline
