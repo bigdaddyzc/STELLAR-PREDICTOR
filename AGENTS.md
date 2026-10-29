@@ -11,8 +11,8 @@ A FastAPI web interface provides a system browser, 2D Plotly orbital distributio
 ## Commands
 
 ```bash
-# Install (editable, with dev tools)
-pip install -e ".[dev,notebooks]"
+# Install (editable, with dev tools and the web interface)
+pip install -e ".[dev,web]"
 
 # Run tests
 pytest tests/ -v
@@ -23,8 +23,11 @@ pytest tests/test_physics/test_kepler.py  # single test file
 stellar-predictor serve --host 127.0.0.1 --port 8000
 # Then open http://127.0.0.1:8000
 
-# Run the Neptune prediction demo (compute-intensive, ~minutes)
-python scripts/run_neptune_demo.py
+# CLI analysis of any built-in system
+stellar-predictor analyze --system trappist1
+
+# Accuracy evaluation incl. Neptune/Uranus retrodiction
+python scripts/eval_accuracy.py
 ```
 
 ## Architecture
@@ -35,9 +38,10 @@ The pipeline flows: **Data → Patterns → Properties → Visualization**
 stellar_predictor/
 ├── data/              # Data models and acquisition
 │   ├── models.py          # CelestialBody, StellarSystem, ExoplanetSystem, GapResult, PredictionResult
-│   ├── fetcher.py         # Unified DataFetcher interface
-│   ├── jpl_horizons.py   # JPL Horizons queries (network-dependent)
-│   └── jpl_client.py     # Low-level JPL API client
+│   ├── known_systems.py   # Canonical built-in data for the 5 systems (single source of truth)
+│   ├── fetcher.py         # Unified DataFetcher; offline J2000 fallback if JPL is unreachable
+│   ├── jpl_horizons.py   # JPL Horizons queries via astroquery (network-dependent)
+│   └── jpl_client.py     # Low-level JPL API client (retry/backoff, lazy on-disk cache)
 ├── physics/           # Physics engine
 │   ├── nbody.py           # REBOUND wrapper (IAS15 integrator)
 │   ├── kepler.py          # Kepler equation solver, element ↔ cartesian conversions
@@ -46,17 +50,17 @@ stellar_predictor/
 ├── patterns/          # Orbital pattern analysis (primary prediction method)
 │   ├── titius_bode.py     # Log-linear TB fitting, weighted/unweighted, gap scoring
 │   ├── stability.py       # Hill radius, mutual Hill separation, stability region detection
-│   └── predictor.py       # GapPredictor: TB + stability → GapResult list with confidence scores
+│   ├── predictor.py       # GapPredictor: TB + stability → GapResult list with confidence scores
+│   └── reliability.py     # Reliability filter + graded reliability score
 ├── prediction/        # High-level prediction pipeline
 │   └── pipeline.py        # PredictionPipeline.analyze(system) → PredictionResult
-├── inference/         # Parameter estimation (for perturbation-based mode)
-│   ├── optimizer.py       # Differential evolution optimizer (scipy)
+├── inference/
 │   └── candidate.py       # CandidateBody with uncertainty tuples (median, lo, hi)
-├── detection/         # Perturbation-based detection (legacy orbit-residual method)
-│   ├── base.py            # ABC: DetectionMethod, DetectionResult
-│   └── orbital_residual.py # Simulate → residuals → periodogram → optimize
-├── verification/      # Validation
-│   └── perturbation.py    # Cross-validate predicted bodies via perturbation injection
+├── validation/
+│   └── retrodiction.py    # Leave-one-out recall harness over the 5 systems
+├── experimental/      # Legacy perturbation-based mode (optional `experimental` extra)
+│   ├── optimizer.py       # Least-squares / differential-evolution optimizer
+│   └── verification/perturbation.py # Cross-validate predicted bodies via perturbation injection
 ├── visualization/     # Plotly (web) + Matplotlib (CLI) visualization
 │   ├── plotly_viz.py      # system_distribution_plot(), titius_bode_plot(), spacing_stability_plot()
 │   └── orbit_plot.py      # Matplotlib orbit plotting
@@ -69,7 +73,7 @@ stellar_predictor/
 │       ├── systems.py         # GET /api/systems, GET /api/systems/{name}/planets
 │       ├── predictions.py     # POST /api/analyze, GET /api/analyze/{task_id}
 │       └── visualizations.py  # GET /api/viz/distribution/{id}, /tb-fit/{id}, /spacing/{id}
-└── cli.py             # Click CLI entry point (serve, predict, fetch-data)
+└── cli.py             # Click CLI entry point (analyze, verify, survey, serve)
 ```
 
 ### Primary Prediction Pipeline (Pattern-Based)
