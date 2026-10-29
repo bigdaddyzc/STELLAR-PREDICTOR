@@ -12,7 +12,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install "ruff>=0.4"
-      - run: ruff check stellar_predictor config
+      - run: ruff check stellar_predictor config tests
   test:
     runs-on: ubuntu-latest
     steps:
@@ -22,4 +22,4 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -e ".[dev,web]"
-      - run: pytest tests/ -v -m "not slow"
+      - run: pytest tests/ -v -m "not slow" --cov=stellar_predictor --cov-report=term-missing:skip-covered

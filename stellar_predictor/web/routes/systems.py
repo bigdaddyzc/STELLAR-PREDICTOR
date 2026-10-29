@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from stellar_predictor.data.known_systems import SOLAR_SYSTEM_PLANETS
 from stellar_predictor.web.schemas import PlanetInfo
@@ -155,4 +155,4 @@ def get_system_planets(name: str):
             "planets": planets,
         }
 
-    return {"error": f"Unknown system: {name}"}
+    raise HTTPException(status_code=404, detail=f"Unknown system: {name}")

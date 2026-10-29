@@ -14,6 +14,10 @@ import sys
 import time
 import numpy as np
 
+# Box-drawing / emoji output must not crash on non-UTF-8 consoles (e.g. GBK).
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 # ---- Build systems (mirrors web/tasks.py) ----
 SOLAR_SYSTEM_PLANETS = [
     ("Mercury", 1.66012e-7, 0.3871, 0.2056),

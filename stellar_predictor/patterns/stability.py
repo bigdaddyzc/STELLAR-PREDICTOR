@@ -15,6 +15,18 @@ from dataclasses import dataclass
 
 import numpy as np
 
+# Bound orbits only; e -> 1 would collapse the periapsis to the star.
+MAX_ECCENTRICITY = 0.99
+
+
+def _finite_or(value, default):
+    """Return ``value`` as a finite float, or ``default`` if it is not one."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return default
+    return f if np.isfinite(f) else default
+
 
 @dataclass
 class HillRadius:
@@ -165,11 +177,19 @@ class StabilityAnalyzer:
 
     @staticmethod
     def extract_planet_data_full(system) -> list[tuple[str, float, float, float]]:
-        """Extract sorted (name, a, mass, eccentricity) from any system representation."""
+        """Extract sorted (name, a, mass, eccentricity) from any system representation.
+
+        Rows are sanitized identically for every input type: planets whose
+        semi-major axis is missing, non-finite or non-positive are dropped
+        (they cannot be placed on a log-spaced orbit sequence), non-finite or
+        negative masses become 0, and eccentricities are clamped to
+        ``[0, MAX_ECCENTRICITY]`` so apoapsis/periapsis spans stay physical.
+        """
         from stellar_predictor.data.models import ExoplanetSystem, StellarSystem
 
+        rows: list[tuple[str, object, object, object]] = []
+
         if isinstance(system, StellarSystem):
-            data = []
             for body in system.planets:
                 a = None
                 ecc = 0.0
@@ -178,31 +198,30 @@ class StabilityAnalyzer:
                     ecc = body.orbital_elements.eccentricity or 0.0
                 elif body.position is not None:
                     a = float(np.sqrt(np.sum(body.position**2)))
-                if a is not None and a > 0:
-                    data.append((body.name, a, body.mass, float(ecc)))
-            return sorted(data, key=lambda x: x[1])
-
-        if isinstance(system, ExoplanetSystem):
-            data = []
+                rows.append((body.name, a, body.mass, ecc))
+        elif isinstance(system, ExoplanetSystem):
             for p in system.sorted_planets():
-                a = p.get("a")
-                mass = p.get("mass", 0.0)
-                name = p.get("name", "?")
+                mass = _finite_or(p.get("mass", 0.0), 0.0)
+                # Earth -> solar masses; unknown mass gets a small placeholder.
+                mass_solar = mass / 332946.0 if mass > 0 else 1e-6
                 # Accept both "eccentricity" (canonical) and legacy "e" key.
-                ecc = p.get("eccentricity", p.get("e", 0.0)) or 0.0
-                if a is not None and a > 0:
-                    mass_solar = mass / 332946.0 if mass > 0 else 1e-6
-                    data.append((name, float(a), float(mass_solar), float(ecc)))
-            return data
+                ecc = p.get("eccentricity", p.get("e", 0.0))
+                rows.append((p.get("name", "?"), p.get("a"), mass_solar, ecc))
+        else:
+            # Assume an iterable of (name, a, mass_solar[, e]) tuples
+            for item in system:
+                ecc = item[3] if len(item) >= 4 else 0.0
+                rows.append((item[0], item[1], item[2], ecc))
 
-        # Assume list of (name, a, mass_solar[, e]) tuples
-        result = []
-        for item in sorted(system, key=lambda x: x[1]):
-            if len(item) >= 4:
-                result.append((item[0], item[1], item[2], float(item[3])))
-            else:
-                result.append((item[0], item[1], item[2], 0.0))
-        return result
+        data = []
+        for name, a, mass, ecc in rows:
+            a_f = _finite_or(a, None)
+            if a_f is None or a_f <= 0:
+                continue
+            m_f = max(_finite_or(mass, 0.0), 0.0)
+            e_f = min(max(_finite_or(ecc, 0.0), 0.0), MAX_ECCENTRICITY)
+            data.append((str(name), a_f, m_f, e_f))
+        return sorted(data, key=lambda x: x[1])
 
     @staticmethod
     def extract_planet_data(system) -> list[tuple[str, float, float]]:

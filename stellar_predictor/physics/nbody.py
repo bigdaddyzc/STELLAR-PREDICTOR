@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import rebound
 
 from stellar_predictor.data.models import CelestialBody, SimulationResult, StellarSystem
 
@@ -17,6 +16,15 @@ class NBodySimulator:
         integrator: str = "ias15",
         units: tuple[str, str, str] = ("AU", "yr", "Msun"),
     ):
+        try:
+            import rebound  # heavy C extension; imported lazily so the
+            # pattern-based core works even where rebound cannot be built.
+        except ImportError as exc:  # pragma: no cover - depends on env
+            raise ImportError(
+                "NBodySimulator requires the 'rebound' package "
+                "(pip install rebound)."
+            ) from exc
+
         self.system = system
         self.sim = rebound.Simulation()
         self.sim.integrator = integrator

@@ -10,27 +10,52 @@ def main():
     pass
 
 
+# Friendly aliases accepted on the command line -> canonical known_systems keys.
+_SYSTEM_ALIASES = {
+    "solar": "solar_system",
+    "sun": "solar_system",
+    "trappist-1": "trappist1",
+    "kepler-11": "kepler11",
+    "kepler-33": "kepler33",
+    "hd-219134": "hd219134",
+    "hd_219134": "hd219134",
+}
+
+
+def _resolve_system_key(system: str) -> str:
+    """Map user input (case/space/dash-insensitive) to a built-in system key.
+
+    Raises click.BadParameter (exit code 2) for unknown systems.
+    """
+    from stellar_predictor.data.known_systems import system_keys
+
+    raw = system.strip().lower().replace(" ", "_")
+    key = _SYSTEM_ALIASES.get(raw, _SYSTEM_ALIASES.get(raw.replace("_", "-"), raw))
+    if key not in system_keys():
+        raise click.BadParameter(
+            f"Unknown system '{system}'. Choose one of: {', '.join(system_keys())}.",
+            param_hint="--system",
+        )
+    return key
+
+
 @click.command()
-@click.option("--system", default="solar_system", help="System to analyze")
+@click.option("--system", default="solar_system", show_default=True,
+              help="Built-in system: solar_system, trappist1, kepler11, kepler33, hd219134")
 def analyze(system: str):
     """Analyze a planetary system for predicted gaps.
 
     Fits a generalized Titius-Bode spacing law and Hill-radius stability
     analysis to identify orbital gaps where unknown planets could exist.
     """
+    from stellar_predictor.data.known_systems import build_system
     from stellar_predictor.patterns.reliability import filter_gaps
     from stellar_predictor.prediction.pipeline import PredictionPipeline
 
-    click.echo(f"Loading system: {system}")
+    key = _resolve_system_key(system)
+    click.echo(f"Loading system: {key}")
     pipeline = PredictionPipeline()
-
-
-    # Load Solar System
-    if system.lower() in ("solar_system", "solar"):
-        full_system = _build_solar_system()
-    else:
-        click.echo(f"ERROR: Unknown system '{system}'. Try 'solar_system'.", err=True)
-        return
+    full_system = build_system(key)
 
     result = pipeline.analyze(full_system)
 
@@ -55,6 +80,10 @@ def analyze(system: str):
         click.echo(f"    R^2: {tb.r_squared:.4f}")
         if tb.outliers:
             click.echo(f"    Outliers: {', '.join(tb.outliers)}")
+
+    if not reliable_gaps:
+        click.echo("\n  No reliable gap predictions for this system.")
+        return
 
     click.echo("\n  Predicted Gaps (by combined score):")
     click.echo(f"  {'#':<4} {'Inner':>8s} {'Outer':>8s} {'Pred a':>8s} {'Period':>8s} {'TB':>6s} {'Stab':>6s} {'Comb':>6s}")
@@ -92,34 +121,66 @@ def survey(min_planets: int, output: str | None):
 
 
 @click.command()
-@click.option("--system", required=True, help="System to verify")
-@click.option("--gap-index", type=int, default=1, help="Which gap to verify (1-indexed)")
+@click.option("--system", default="solar_system", show_default=True,
+              help="System to verify (N-body verification supports solar_system only)")
+@click.option("--gap-index", type=click.IntRange(min=1), default=1,
+              help="Which gap to verify (1-indexed)")
 def verify(system: str, gap_index: int):
-    """Run N-body perturbation verification on a predicted gap."""
-    from stellar_predictor.physics import NBodySimulator
+    """Run N-body perturbation verification on a predicted gap.
+
+    Requires the optional ``experimental`` extra and the ``rebound`` package.
+    """
+    from stellar_predictor.data.known_systems import build_solar_system
     from stellar_predictor.prediction.pipeline import PredictionPipeline
 
-    click.echo(f"Analyzing {system}...")
+    key = _resolve_system_key(system)
+    if key != "solar_system":
+        raise click.BadParameter(
+            "N-body verification needs full orbital elements and currently "
+            "supports only 'solar_system'.",
+            param_hint="--system",
+        )
+    import importlib.util
+
+    if importlib.util.find_spec("rebound") is None:
+        raise click.ClickException(
+            "verify requires the 'rebound' package (pip install rebound)."
+        )
+    try:
+        from stellar_predictor.experimental.verification.perturbation import (
+            PerturbationVerifier,
+        )
+    except ImportError as exc:
+        raise click.ClickException(
+            f"verify requires optional dependencies: {exc}. "
+            'Install with: pip install -e ".[experimental]"'
+        ) from exc
+
+    click.echo(f"Analyzing {key}...")
     pipeline = PredictionPipeline()
-    full_system = _build_solar_system()
+    full_system = build_solar_system()
     result = pipeline.analyze(full_system)
 
     if not result.predicted_gaps:
         click.echo("No gaps to verify.")
         return
 
-    idx = min(gap_index - 1, len(result.predicted_gaps) - 1)
+    if gap_index > len(result.predicted_gaps):
+        raise click.BadParameter(
+            f"only {len(result.predicted_gaps)} gap(s) predicted.",
+            param_hint="--gap-index",
+        )
+    idx = gap_index - 1
     gap = result.predicted_gaps[idx]
 
     click.echo(f"Verifying gap {idx + 1}: {gap.inner_planet} → {gap.outer_planet} "
                f"(predicted a = {gap.predicted_a:.2f} AU)")
 
+    from stellar_predictor.physics import NBodySimulator
+
     sim = NBodySimulator(full_system)
     sim_result = sim.simulate(t_end=80, n_steps=400)
 
-    from stellar_predictor.experimental.verification.perturbation import (
-        PerturbationVerifier,
-    )
     verifier = PerturbationVerifier(
         full_system,
         observed_positions=sim_result.positions,
@@ -146,33 +207,6 @@ def serve(host: str, port: int):
     from stellar_predictor.web.app import create_app
     app = create_app()
     uvicorn.run(app, host=host, port=port)
-
-
-def _build_solar_system():
-    """Build Solar System model from hardcoded J2000 orbital elements."""
-    import numpy as np
-
-    from stellar_predictor.data.models import CelestialBody, OrbitalElements, StellarSystem
-
-    planets = [
-        ("Mercury", 1.66012e-7, 0.3871, 0.2056, 0.1222, 0.8436, 0.5088, 4.4026),
-        ("Venus", 2.44783e-6, 0.7233, 0.0068, 0.0592, 1.3383, 0.9577, 3.1761),
-        ("Earth", 3.00273e-6, 1.0000, 0.0167, 0.0000, -0.1965, 1.7968, 6.2400),
-        ("Mars", 3.22715e-7, 1.5237, 0.0934, 0.0323, 0.8653, -1.1951, 0.3381),
-        ("Jupiter", 9.54786e-4, 5.2034, 0.0484, 0.0227, 1.7534, 0.2389, 0.3411),
-        ("Saturn", 2.85837e-4, 9.5371, 0.0542, 0.0434, 1.9847, 1.6130, 5.5647),
-        ("Uranus", 4.36624e-5, 19.1913, 0.0472, 0.0135, 1.2956, 1.6929, 2.4844),
-        ("Neptune", 5.15138e-5, 30.0690, 0.0086, 0.0309, 2.2999, -1.4869, 4.4715),
-    ]
-
-    system = StellarSystem(name="Solar System", source="J2000 orbital elements")
-    system.add_body(CelestialBody("Sun", 1.0, np.zeros(3), np.zeros(3)))
-    for name, mass, a, e, i, Om, om, M in planets:
-        system.add_body(CelestialBody(
-            name=name, mass=mass,
-            orbital_elements=OrbitalElements(a, e, i, Om, om, M),
-        ))
-    return system
 
 
 main.add_command(analyze)

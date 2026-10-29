@@ -7,6 +7,7 @@ surfaces the key fields, not exhaustive behavior.
 
 from __future__ import annotations
 
+import pytest
 from click.testing import CliRunner
 
 from stellar_predictor.cli import main
@@ -62,8 +63,28 @@ class TestCLI:
     def test_analyze_unknown_system_errors(self):
         from stellar_predictor.cli import analyze
         result = CliRunner().invoke(analyze, ["--system", "nonexistent"])
-        assert result.exit_code == 0  # handled gracefully, not a crash
+        assert result.exit_code == 2  # usage error, not a crash and not success
         assert "Unknown system" in result.output
+        assert "trappist1" in result.output  # lists the valid choices
+
+    @pytest.mark.parametrize("system", [
+        "trappist1", "kepler11", "kepler33", "hd219134",
+        "TRAPPIST-1", "Kepler-11", "HD 219134", "solar",
+    ])
+    def test_analyze_all_builtin_systems(self, system):
+        result = CliRunner().invoke(main, ["analyze", "--system", system])
+        assert result.exit_code == 0, result.output
+        assert "Known planets:" in result.output
+
+    def test_verify_rejects_non_solar_system(self):
+        result = CliRunner().invoke(main, ["verify", "--system", "trappist1"])
+        assert result.exit_code == 2
+        assert "solar_system" in result.output
+
+    def test_verify_rejects_non_positive_gap_index(self):
+        # gap_index=0 used to silently verify the *last* gap (index -1).
+        result = CliRunner().invoke(main, ["verify", "--gap-index", "0"])
+        assert result.exit_code == 2
 
 
 class TestWebTaskPath:

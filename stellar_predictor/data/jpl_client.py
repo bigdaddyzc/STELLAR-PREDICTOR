@@ -9,6 +9,7 @@ from __future__ import annotations
 import calendar
 import hashlib
 import json
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -46,7 +47,8 @@ SOLAR_SYSTEM_MASSES = {
 
 CACHE_DIR = Path("data/cache/jpl")
 
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
+# HTTP statuses worth retrying (transient server-side / throttling errors).
+RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 JPL_API = "https://ssd.jpl.nasa.gov/api/horizons.api"
 
@@ -78,46 +80,89 @@ def _advance_date(jpl_date: str, days: int) -> str:
 
 
 class JPLClient:
-    """Direct HTTP client for JPL Horizons ephemeris data."""
+    """Direct HTTP client for JPL Horizons ephemeris data.
 
-    def __init__(self, timeout: int = 30, max_retries: int = 3):
+    Responses are cached on disk (``cache_dir``) so repeated queries work
+    offline. The cache directory is created lazily on first write, never at
+    import time. Transient failures (timeouts, connection errors, HTTP
+    429/5xx) are retried with exponential backoff; anything else fails fast.
+    """
+
+    def __init__(self, timeout: int = 30, max_retries: int = 3,
+                 cache_dir: Path | str | None = None,
+                 backoff_s: float = 1.0):
+        if max_retries < 1:
+            raise ValueError("max_retries must be >= 1")
         self.timeout = timeout
         self.max_retries = max_retries
+        self.cache_dir = Path(cache_dir) if cache_dir is not None else CACHE_DIR
+        self.backoff_s = backoff_s
         self.session = requests.Session()
 
     def _cache_key(self, *args) -> str:
         raw = "|".join(str(a) for a in args)
         return hashlib.md5(raw.encode()).hexdigest()[:16]
 
+    def _read_cache(self, cache_file: Path) -> str | None:
+        try:
+            text = cache_file.read_text()
+        except OSError:
+            return None
+        # An empty/truncated file (e.g. interrupted write) is not a valid hit.
+        return text if "$$SOE" in text else None
+
+    def _write_cache(self, cache_file: Path, text: str) -> None:
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(text)
+        except OSError:
+            pass  # read-only FS etc.: caching is best-effort
+
     def _query(self, params: dict) -> str:
-        """Query JPL Horizons API with retries."""
+        """Query JPL Horizons API with retries and an on-disk cache."""
         cache_key = self._cache_key(json.dumps(params, sort_keys=True))
-        cache_file = CACHE_DIR / f"{cache_key}.txt"
+        cache_file = self.cache_dir / f"{cache_key}.txt"
 
-        if cache_file.exists():
-            return cache_file.read_text()
+        cached = self._read_cache(cache_file)
+        if cached is not None:
+            return cached
 
-        last_error = None
-        for _attempt in range(self.max_retries):
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries):
+            if attempt and self.backoff_s > 0:
+                time.sleep(self.backoff_s * 2 ** (attempt - 1))
             try:
                 resp = self.session.get(
                     JPL_API, params=params, timeout=self.timeout
                 )
-                resp.raise_for_status()
-                text = resp.text
-                if "Bad dates" in text or "start must be earlier" in text:
-                    raise ValueError("JPL date error (try different date format)")
-                cache_file.write_text(text)
-                return text
             except (requests.Timeout, requests.ConnectionError) as e:
                 last_error = e
                 continue
-            except ValueError:
-                raise  # Don't retry date errors
+            if resp.status_code in RETRYABLE_STATUS:
+                last_error = requests.HTTPError(
+                    f"HTTP {resp.status_code} from JPL Horizons", response=resp
+                )
+                continue
+            resp.raise_for_status()  # other 4xx: a bad request, don't retry
+            text = resp.text
+            if "Bad dates" in text or "start must be earlier" in text:
+                raise ValueError("JPL date error (try different date format)")
+            if "$$SOE" in text:  # only cache responses that carry data
+                self._write_cache(cache_file, text)
+            return text
 
         raise ConnectionError(
-            f"JPL Horizons unreachable after {self.max_retries} retries: {last_error}"
+            f"JPL Horizons unreachable after {self.max_retries} attempts: {last_error}"
         )
+
+    @staticmethod
+    def _horizons_id(body: str) -> str:
+        try:
+            return HORIZONS_IDS[body]
+        except KeyError:
+            raise ValueError(
+                f"Unknown body '{body}'. Known: {', '.join(HORIZONS_IDS)}"
+            ) from None
 
     def get_ephemeris(
         self,
@@ -130,7 +175,7 @@ class JPLClient:
 
         Returns dict with keys: times_jd, positions_au (N,3), velocities_au_day (N,3)
         """
-        obj_id = HORIZONS_IDS[body]
+        obj_id = self._horizons_id(body)
         jpl_start = _to_jpl_date(start_time)
         jpl_stop = _to_jpl_date(stop_time)
 
@@ -203,7 +248,7 @@ class JPLClient:
 
     def get_orbital_elements(self, body: str, epoch: str = "2000-Jan-01") -> dict:
         """Fetch osculating orbital elements at epoch."""
-        obj_id = HORIZONS_IDS[body]
+        obj_id = self._horizons_id(body)
         jpl_epoch = _to_jpl_date(epoch)
         params = {
             "format": "text",

@@ -39,8 +39,8 @@ The web interface provides:
 ## 🚀 Quick Start
 
 ```bash
-# Install (editable with dev tools)
-pip install -e ".[dev,notebooks]"
+# Install (editable, with dev tools and the web interface)
+pip install -e ".[dev,web]"
 
 # Launch web interface
 stellar-predictor serve --host 127.0.0.1 --port 8000
@@ -51,14 +51,20 @@ stellar-predictor serve --host 127.0.0.1 --port 8000
 ### Commands
 
 ```bash
-# Predict gaps for Solar System (CLI)
+# Predict gaps (CLI) — any built-in system:
+# solar_system, trappist1, kepler11, kepler33, hd219134
 stellar-predictor analyze --system solar_system
+stellar-predictor analyze --system trappist1
+
+# N-body perturbation check of a predicted Solar System gap
+# (needs: pip install -e ".[experimental]" and rebound)
+stellar-predictor verify --gap-index 1
 
 # Run tests
 pytest tests/ -v
 
 # Full accuracy evaluation (includes the Neptune retrodiction test)
-PYTHONIOENCODING=utf-8 python scripts/eval_accuracy.py
+python scripts/eval_accuracy.py
 ```
 
 ---
@@ -139,8 +145,11 @@ stellar_predictor/
 │   ├── properties.py      M-R relations, T_eq, surface gravity
 │   ├── kepler.py          Kepler equation solver
 │   └── nbody.py           REBOUND N-body integrator
-├── data/              # Data models
-│   └── models.py          CelestialBody, GapResult, ExoplanetSystem
+├── data/              # Data models and sources
+│   ├── models.py          CelestialBody, GapResult, ExoplanetSystem
+│   ├── known_systems.py   Built-in data for the 5 systems (offline)
+│   ├── fetcher.py         DataFetcher (JPL with offline J2000 fallback)
+│   └── jpl_client.py      JPL Horizons HTTP client (retries + disk cache)
 ├── web/               # FastAPI web interface
 │   ├── app.py             Application factory
 │   ├── tasks.py           Analysis orchestration + report generation
@@ -150,8 +159,8 @@ stellar_predictor/
 │   └── plotly_viz.py      Distribution, TB fit, stability plots
 ├── prediction/        # High-level pipeline
 │   └── pipeline.py        PredictionPipeline orchestrator
-├── verification/      # Perturbation verification
-│   └── perturbation.py    N-body cross-validation
+├── experimental/      # Legacy perturbation-based verification (optional extra)
+│   └── verification/perturbation.py   N-body cross-validation
 └── cli.py             # Click CLI entry point
 ```
 
@@ -199,7 +208,9 @@ pytest tests/test_patterns/         # Pattern analysis only
 pytest tests/ --cov=stellar_predictor
 ```
 
-**47 tests** covering: physics (kepler, nbody), patterns (TB fit, stability, predictor, reliability), integration (solar system).
+**170 tests** covering: physics (kepler, nbody, properties), patterns (TB fit, stability, predictor, reliability, input sanitization), data (JPL client retries/caching, offline fallback), web API routes, CLI, and leave-one-out validation. CI (GitHub Actions) runs ruff plus `pytest -m "not slow"` with a coverage report.
+
+The N-body tests are skipped automatically if `rebound` is not installed (it has no prebuilt wheel on some platforms, e.g. Linux aarch64 without a C compiler); everything else runs without it.
 
 ---
 
