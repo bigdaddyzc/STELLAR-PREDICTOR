@@ -24,7 +24,7 @@ Stellar Predictor analyzes known planetary systems to identify orbital gaps wher
 
 ## 🖥️ Web Interface
 
-![Stellar Predictor Web UI](assets/web_ui.png)
+Run `stellar-predictor serve` and open http://127.0.0.1:8000.
 
 The web interface provides:
 - **System browser** — select from 5 planetary systems
@@ -57,10 +57,7 @@ stellar-predictor analyze --system solar_system
 # Run tests
 pytest tests/ -v
 
-# Neptune retrodiction demo
-python scripts/run_neptune_demo.py
-
-# Full accuracy evaluation
+# Full accuracy evaluation (includes the Neptune retrodiction test)
 PYTHONIOENCODING=utf-8 python scripts/eval_accuracy.py
 ```
 
