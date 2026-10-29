@@ -58,6 +58,17 @@ CROSS_GAP_MAX_BOOST = 0.15         # max combined_score boost from TB-consistent
 CROSS_GAP_REL_ERR_TOLERANCE = 0.20  # max relative span error to earn a boost
 SYSTEM_LOGISTIC_OFFSET = 0.15      # x/(x+offset) system-level score normalization
 
+# v0.7: Scoring v2 — TB gating, resonant-chain down-weighting, extrapolation
+# penalty (calibrated against tests/test_validation/test_retrodiction_ranking.py)
+TB_GATE_FLOOR = 0.15               # combined *= floor + (1-floor)*TB; TB=0 caps at 15%
+TB_STEP_INTEGRALITY_WIDTH = 0.30   # Gaussian width (in TB steps) for "whole missing slots"
+CHAIN_PENALTY = 0.60               # max global cut for a fully locked resonant chain
+CHAIN_LOCK_THRESHOLD = 0.50        # penalty ramps from this locked-pair fraction to 1.0
+PAIR_RESONANCE_PENALTY = 0.70      # extra cut for a pair locked near a first-order MMR
+EXTRAPOLATION_BASE = 0.60          # factor for the first slot beyond the outermost planet
+EXTRAPOLATION_DECAY = 0.60         # each further TB step multiplies by this
+EDGE_STABILITY_CAP = 0.70          # edge stability saturates (empty space is not evidence)
+
 # Verification
 VERIFICATION_THRESHOLD = 1.5
 VERIFICATION_TIMEOUT = 600

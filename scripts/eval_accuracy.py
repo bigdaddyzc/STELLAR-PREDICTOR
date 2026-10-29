@@ -290,9 +290,12 @@ if result_7.tb_fit:
     tb7 = result_7.tb_fit
     print(f"  TB fit: a_n = {tb7.alpha:.4f} x {tb7.beta:.4f}^n, R2 = {tb7.r_squared:.4f}")
     neptune_predicted = None
+    # Candidates are sorted by score: the first one after Uranus is the
+    # model's actual pick (previously the *last* printed one was scored).
     for g in result_7.predicted_gaps:
         if g.inner_planet == "Uranus":
-            neptune_predicted = g.predicted_a
+            if neptune_predicted is None:
+                neptune_predicted = g.predicted_a
             print(f"  Gap after Uranus: predicted = {g.predicted_a:.2f} AU, confidence = {g.combined_score:.3f}")
     if neptune_predicted:
         print(f"  Actual Neptune: 30.07 AU")
@@ -306,7 +309,7 @@ if result_7.tb_fit:
 
 # Test with Solar System minus both Uranus & Neptune (pre-1781)
 print("\n  2. Pre-Uranus Solar System (6 planets, no Uranus/Neptune):")
-ss6_planets = ss7_planets[:5]  # Mercury through Saturn
+ss6_planets = ss7_planets[:6]  # Mercury through Saturn (was [:5], which dropped Saturn too)
 predictor_6 = GapPredictor(stellar_mass=1.0)
 result_6 = predictor_6.predict(ss6_planets)
 if result_6.tb_fit:
@@ -318,8 +321,13 @@ if result_6.tb_fit:
     uranus_gap = [g for g in result_6.predicted_gaps if g.inner_planet == "Saturn"]
     if uranus_gap:
         u = uranus_gap[0]
+        closest = min(uranus_gap, key=lambda g: abs(g.predicted_a - 19.19))
         print(f"  Uranus actual: 19.19 AU")
-        print(f"  Error: {abs(u.predicted_a - 19.19) / 19.19 * 100:.1f}%")
+        print(f"  Top beyond-Saturn pick: {u.predicted_a:.2f} AU, "
+              f"error {abs(u.predicted_a - 19.19) / 19.19 * 100:.1f}%")
+        print(f"  Closest beyond-Saturn candidate: {closest.predicted_a:.2f} AU "
+              f"(rank {uranus_gap.index(closest) + 1} of {len(uranus_gap)}), "
+              f"error {abs(closest.predicted_a - 19.19) / 19.19 * 100:.1f}%")
 
 # ---- Solar System known gaps (asteroid positions for verification) ----
 print("\n  3. Known asteroid belt positions in Solar System gaps:")

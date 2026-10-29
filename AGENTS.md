@@ -23,8 +23,8 @@ pytest tests/test_physics/test_kepler.py  # single test file
 stellar-predictor serve --host 127.0.0.1 --port 8000
 # Then open http://127.0.0.1:8000
 
-# CLI analysis of any built-in system
-stellar-predictor analyze --system trappist1
+# CLI analysis of any built-in system (optionally save a PNG summary plot)
+stellar-predictor analyze --system trappist1 --plot trappist1.png
 
 # Accuracy evaluation incl. Neptune/Uranus retrodiction
 python scripts/eval_accuracy.py
@@ -86,9 +86,10 @@ stellar_predictor/
 6. Uncertainty propagation from TB residual sigma to mass, period, and combined score
 7. Multi-planet-per-wide-gap detection via TB harmonic spacing
 8. Outer-edge prediction via TB beta extrapolation (up to 3 steps beyond last planet)
-9. Cross-gap consistency pass: amplitude-modulated boost for TB-aligned multi-step spans
-10. System-level logistic normalization: score / (score + 0.15)
-11. Derive physical parameters for each predicted body (M-R relation, equilibrium temperature, surface gravity, Hill sphere)
+9. Cross-gap consistency pass: amplitude-modulated (multiplicative) boost for TB-aligned multi-step spans
+10. Scoring v2 (v0.7): TB gate `0.15 + 0.85*TB`, pair-lock + resonant-chain down-weighting, per-step extrapolation penalty for outer-edge candidates
+11. System-level logistic normalization: score / (score + 0.15)
+12. Derive physical parameters for each predicted body (M-R relation, equilibrium temperature, surface gravity, Hill sphere)
 
 ### Unit System
 

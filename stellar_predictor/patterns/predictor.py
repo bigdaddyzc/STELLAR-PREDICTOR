@@ -8,6 +8,18 @@ v0.3 improvements:
 - Eccentricity-aware Hill stability gaps
 - Confidence intervals for the predicted semi-major axes derived from
   TB-fit residual scatter
+
+v0.7 (scoring v2):
+- TB evidence is a continuous "missing slots" measure (how many TB steps the
+  gap spans, and how close that is to a whole number of slots).
+- The combined score is *gated* by TB evidence, so a wide-but-unremarkable
+  gap (high stability, TB ~ 0) can no longer score high on stability alone.
+- Resonant chains are down-weighted globally, and a pair that is itself
+  locked near a first-order MMR is penalised further (a body in between
+  would break the lock).
+- Outer-edge extrapolations are penalised per TB step beyond the outermost
+  known planet.
+- Orbital periods use the stellar mass: P = sqrt(a^3 / M_star) (years).
 """
 
 from __future__ import annotations
@@ -27,11 +39,17 @@ from stellar_predictor.patterns.titius_bode import TBResult, TitiusBodeFit
 
 try:
     from config.settings import (
+        CHAIN_LOCK_THRESHOLD,
+        CHAIN_PENALTY,
         CROSS_GAP_MAX_BOOST,
         CROSS_GAP_REL_ERR_TOLERANCE,
+        EDGE_STABILITY_CAP,
+        EXTRAPOLATION_BASE,
+        EXTRAPOLATION_DECAY,
         MULTI_PLANET_MIN_STEPS,
         OUTER_EDGE_MIN_R2,
         OUTER_EDGE_STEPS,
+        PAIR_RESONANCE_PENALTY,
         RESONANCE_BASE_WEIGHT,
         RESONANCE_PULL_FRACTION,
         RESONANCE_SCORE_WEIGHT,
@@ -41,7 +59,9 @@ try:
         STABILITY_SIGMOID_SCALE,
         SYSTEM_LOGISTIC_OFFSET,
         TB_BASE_WEIGHT,
+        TB_GATE_FLOOR,
         TB_RATIO_EXCESS_THRESHOLD,
+        TB_STEP_INTEGRALITY_WIDTH,
     )
 except ImportError:  # standalone fallback
     RESONANCES = [(2, 1), (3, 2), (4, 3), (5, 3), (5, 4), (3, 1), (5, 2), (7, 3)]
@@ -59,6 +79,14 @@ except ImportError:  # standalone fallback
     CROSS_GAP_MAX_BOOST = 0.15
     CROSS_GAP_REL_ERR_TOLERANCE = 0.20
     SYSTEM_LOGISTIC_OFFSET = 0.15
+    TB_GATE_FLOOR = 0.15
+    TB_STEP_INTEGRALITY_WIDTH = 0.30
+    CHAIN_PENALTY = 0.60
+    CHAIN_LOCK_THRESHOLD = 0.50
+    PAIR_RESONANCE_PENALTY = 0.70
+    EXTRAPOLATION_BASE = 0.60
+    EXTRAPOLATION_DECAY = 0.60
+    EDGE_STABILITY_CAP = 0.70
 
 
 @dataclass
@@ -140,6 +168,14 @@ class GapPredictor:
             axes, names, tb_result, stability_regions, planet_data, eccs
         )
 
+        chain_lock = self._resonant_chain_lock(axes)
+        if chain_lock > CHAIN_LOCK_THRESHOLD:
+            warnings.append(
+                f"Compact resonant chain detected ({chain_lock:.0%} of adjacent "
+                "pairs locked near a low-order MMR); gap scores are down-weighted "
+                "because a hidden body would break the chain."
+            )
+
         # 4. Normalize scores at system level (logistic squash preserving rank order)
         if predicted_gaps:
             for g in predicted_gaps:
@@ -192,6 +228,60 @@ class GapPredictor:
                         best = max(best, score)
         return best
 
+    def _period_yr(self, a_au: float) -> float:
+        """Kepler's third law in AU / yr / M_sun: P = sqrt(a^3 / M_star)."""
+        m = self.stellar_mass if self.stellar_mass and self.stellar_mass > 0 else 1.0
+        return float(math.sqrt(max(a_au, 0.0) ** 3 / m))
+
+    @staticmethod
+    def _tb_step_score(inner_a: float, outer_a: float, beta: float) -> float:
+        """TB evidence [0, 0.9] that whole TB slots are missing between two planets.
+
+        ``steps = ln(a_out/a_in) / ln(beta)`` is the number of TB steps the
+        pair spans. One step means "no slot missing". Evidence rises from
+        1.3 to 2.0 steps and is modulated by integrality: 2.86 steps
+        (Mars-Jupiter) looks like whole missing slots, 1.5 steps
+        (Mercury-Venus) is just an irregular spacing.
+        """
+        if inner_a <= 0 or outer_a <= inner_a or beta <= 1.01:
+            return 0.0
+        steps = math.log(outer_a / inner_a) / math.log(beta)
+        missing = min(1.0, max(0.0, (steps - 1.3) / 0.7))
+        if missing <= 0.0:
+            return 0.0
+        k = max(2, round(steps))
+        integrality = math.exp(-((steps - k) / TB_STEP_INTEGRALITY_WIDTH) ** 2)
+        return 0.9 * missing * (0.5 + 0.5 * integrality)
+
+    @staticmethod
+    def _tb_gate(tb_score: float) -> float:
+        """Multiplicative gate: stability/resonance only count with TB support."""
+        tb = min(1.0, max(0.0, tb_score))
+        return TB_GATE_FLOOR + (1.0 - TB_GATE_FLOOR) * tb
+
+    @staticmethod
+    def _pair_resonance_factor(inner_a: float, outer_a: float) -> float:
+        """Penalty [1-PAIR_RESONANCE_PENALTY, 1] for a pair locked near a first-order MMR."""
+        if inner_a <= 0 or outer_a <= inner_a:
+            return 1.0
+        period_ratio = (outer_a / inner_a) ** 1.5
+        best = 0.0
+        for p, q in RESONANCES:
+            # Tight first-order locks only (3:2, 4:3, 5:4). A 2:1 pair can
+            # host a body in between (2:1 = 4:3 x 3:2), so it is not penalised.
+            if p - q != 1 or q < 2:
+                continue
+            rel = abs(period_ratio - p / q) / (p / q)
+            tol = 2.0 * RESONANCE_TOLERANCE
+            if rel < tol:
+                best = max(best, math.exp(-3.0 * (rel / tol) ** 2))
+        return 1.0 - PAIR_RESONANCE_PENALTY * best
+
+    @staticmethod
+    def extrapolation_factor(step: int) -> float:
+        """Penalty for a candidate ``step`` TB slots beyond the outermost planet."""
+        return EXTRAPOLATION_BASE * EXTRAPOLATION_DECAY ** max(0, step - 1)
+
     def _stability_score_sigmoid(self, gap_ratio: float) -> float:
         """Sigmoid stability score: gradual saturation.
 
@@ -226,6 +316,39 @@ class GapPredictor:
                         near += 1
                         break
         return near / total if total else 0.0
+
+    @staticmethod
+    def _resonant_chain_lock(axes: list[float]) -> float:
+        """Fraction [0, 1] of adjacent pairs that are *compact and locked*.
+
+        Stricter than :meth:`_detect_resonance_chain` (which uses a doubled
+        tolerance and all eight MMRs, so the Solar System scores 0.86): a
+        pair counts only if its period ratio is <= ~2.1 and within
+        ``RESONANCE_TOLERANCE`` of an MMR with p/q <= 2. TRAPPIST-1 -> 1.0,
+        Solar System -> 0.29.
+        """
+        if len(axes) < 3:
+            return 0.0
+        locked = 0
+        total = 0
+        for i in range(len(axes) - 1):
+            if axes[i] <= 0:
+                continue
+            total += 1
+            pr = (axes[i + 1] / axes[i]) ** 1.5
+            if pr > 2.0 * (1.0 + RESONANCE_TOLERANCE):
+                continue
+            for p, q in RESONANCES:
+                if p / q <= 2.0 and abs(pr - p / q) / (p / q) < RESONANCE_TOLERANCE:
+                    locked += 1
+                    break
+        return locked / total if total else 0.0
+
+    @staticmethod
+    def chain_penalty_factor(chain_lock: float) -> float:
+        """Global score factor; only systems that are mostly locked are penalised."""
+        excess = max(0.0, chain_lock - CHAIN_LOCK_THRESHOLD) / (1.0 - CHAIN_LOCK_THRESHOLD)
+        return 1.0 - CHAIN_PENALTY * min(1.0, excess)
 
     def _tb_confidence(self, tb_result: TBResult | None) -> float:
         """Confidence [0, 1] that the TB position estimate is trustworthy.
@@ -323,23 +446,17 @@ class GapPredictor:
             tb_anchor = None  # TB index-level prediction when available
 
             if tb_result is not None and tb_result.r_squared >= 0.5:
-                expected_ratio = tb_result.beta
-                actual_ratio = outer_a / inner_a if inner_a > 0 else float("inf")
-                ratio_excess = actual_ratio / max(expected_ratio, 1.01)
+                # v0.7: continuous "missing slots" evidence (replaces the
+                # ratio-excess ramp + flat 0.9 for any index skip, which
+                # scored Saturn-Uranus as high as Mars-Jupiter).
+                tb_score = self._tb_step_score(inner_a, outer_a, tb_result.beta)
 
-                if ratio_excess > TB_RATIO_EXCESS_THRESHOLD:
-                    # Scale: excess=1.15 → 0.3, excess=3.0 → 0.9
-                    tb_score = min(0.9, 0.3 + 0.4 * (ratio_excess - 1.0))
-
-                # Check TB gap match for index-level prediction
+                # TB index-level prediction anchors the *position* only
                 tb_gaps = self._tb_fitter.score_gaps(tb_result, axes, names)
                 for tg in tb_gaps:
                     if (tg.inner_planet == inner_name and
                             tg.outer_planet == outer_name):
                         tb_anchor = tg.predicted_a
-                        tb_score = max(tb_score, 0.7)
-                        if inner_a < tb_anchor < outer_a:
-                            tb_score = max(tb_score, 0.9)
                         break
             else:
                 tb_score = 0.3
@@ -435,17 +552,22 @@ class GapPredictor:
                         if i < len(stability_regions):
                             sr = stability_regions[i]
                             if sr.inner_boundary_au < sub_a < sr.outer_boundary_au:
-                                sub_tb = 0.6
+                                # Sub-slots inherit (and never exceed) the
+                                # parent gap's TB evidence.
+                                sub_tb = min(0.6, 0.75 * tb_score)
                                 sub_stab = self._stability_score_sigmoid(
                                     (outer_a - inner_a) / max(sr.gap_ratio, 0.01))
                                 sub_res = self._resonance_score(sub_a, inner_a, outer_a)
                                 sub_w = tb_w + stab_w + res_w
                                 sub_combined = (tb_w * sub_tb + stab_w * sub_stab
                                                 + res_w * sub_res) / max(sub_w, 1e-9)
+                                sub_combined *= (self._tb_gate(sub_tb)
+                                                 * self._pair_resonance_factor(
+                                                     inner_a, outer_a))
                                 sub_gaps_for_this_pair.append(GapResult(
                                     inner_a=inner_a, outer_a=outer_a,
                                     predicted_a=round(sub_a, 4),
-                                    predicted_period=round(sub_a ** 1.5, 2),
+                                    predicted_period=round(self._period_yr(sub_a), 6),
                                     titius_bode_score=round(sub_tb, 3),
                                     stability_score=round(sub_stab, 3),
                                     combined_score=round(sub_combined, 3),
@@ -469,7 +591,11 @@ class GapPredictor:
                 uncertainty_penalty = 1.0 / (1.0 + 2.0 * tb_sigma)
                 combined *= uncertainty_penalty
 
-            period = predicted_a ** 1.5
+            # v0.7: TB gating + per-pair resonance lock penalty
+            combined *= self._tb_gate(tb_score)
+            combined *= self._pair_resonance_factor(inner_a, outer_a)
+
+            period = self._period_yr(predicted_a)
             method = "titius_bode+stability" if tb_result else "stability_only"
             if resonance > 0.5:
                 method += "+resonance"
@@ -477,7 +603,7 @@ class GapPredictor:
             gaps.append(GapResult(
                 inner_a=inner_a, outer_a=outer_a,
                 predicted_a=round(predicted_a, 4),
-                predicted_period=round(period, 2),
+                predicted_period=round(period, 6),
                 titius_bode_score=round(tb_score, 3),
                 stability_score=round(stability_score, 3),
                 combined_score=round(combined, 3),
@@ -495,7 +621,7 @@ class GapPredictor:
             gaps.extend(sub_gaps_for_this_pair)
 
         # ---- Pass 1b: Outer-edge prediction (beyond last known planet) ----
-        self._predict_outer_edge(
+        edge_steps = self._predict_outer_edge(
             gaps, axes, names, tb_result, masses_sun, eccs,
             tb_w, stab_w, res_w,
         )
@@ -503,20 +629,31 @@ class GapPredictor:
         # ---- Pass 2: cross-gap consistency (amplitude-modulated) ----
         self._apply_cross_gap_consistency(gaps, tb_result)
 
+        # ---- Pass 3 (v0.7): extrapolation + resonant-chain penalties ----
+        # Applied last so no boost can re-order them away.
+        for g, step in edge_steps:
+            g.combined_score *= self.extrapolation_factor(step)
+        chain_factor = self.chain_penalty_factor(self._resonant_chain_lock(axes))
+        for g in gaps:
+            g.combined_score = round(g.combined_score * chain_factor, 3)
+
         return gaps
 
     def _predict_outer_edge(self, gaps: list[GapResult], axes: list[float],
                             names: list[str], tb_result: TBResult | None,
                             masses_sun: list[float], eccs: list[float],
-                            tb_w: float, stab_w: float, res_w: float) -> None:
+                            tb_w: float, stab_w: float, res_w: float
+                            ) -> list[tuple[GapResult, int]]:
         """Append TB-extrapolated predictions beyond the outermost planet.
 
-        Mutates ``gaps`` in place. Only runs when the TB fit is good enough
-        (``OUTER_EDGE_MIN_R2``); steps out to ``OUTER_EDGE_STEPS`` slots,
-        stopping at a 500 AU sanity cap.
+        Mutates ``gaps`` in place and returns ``(gap, step)`` pairs so the
+        caller can apply the per-step extrapolation penalty. Only runs when
+        the TB fit is good enough (``OUTER_EDGE_MIN_R2``); steps out to
+        ``OUTER_EDGE_STEPS`` slots, stopping at a 500 AU sanity cap.
         """
+        added: list[tuple[GapResult, int]] = []
         if tb_result is None or tb_result.r_squared < OUTER_EDGE_MIN_R2:
-            return
+            return added
         n = len(axes)
         outer_a = axes[-1]
         outer_name = names[-1]
@@ -538,18 +675,23 @@ class GapPredictor:
                 1e-12)
             edge_stab = self._stability_score_sigmoid(
                 sep / max(self._stability.critical_sep, 1.0) * 3.0)
+            # v0.7: open space beyond the outermost planet is not positive
+            # evidence, so the edge stability term saturates instead of
+            # growing with distance (which used to rank +3 above +1).
+            edge_stab = min(edge_stab, EDGE_STABILITY_CAP)
 
             # Mass prior: wider for outer systems
             edge_mass_range = (0.5, min(500.0, 15.0 * (predicted_a / outer_a)))
 
             e_w = tb_w + stab_w + res_w
             e_combined = (tb_w * edge_tb_score + stab_w * edge_stab) / max(e_w, 1e-9)
+            e_combined *= self._tb_gate(edge_tb_score)
 
-            gaps.append(GapResult(
+            edge_gap = GapResult(
                 inner_a=outer_a,
                 outer_a=predicted_a * 1.3,
                 predicted_a=round(predicted_a, 4),
-                predicted_period=round(predicted_a ** 1.5, 2),
+                predicted_period=round(self._period_yr(predicted_a), 6),
                 titius_bode_score=round(edge_tb_score, 3),
                 stability_score=round(edge_stab, 3),
                 combined_score=round(e_combined, 3),
@@ -561,7 +703,10 @@ class GapPredictor:
                 predicted_a_upper=round(predicted_a * 1.2, 4),
                 predicted_eccentricity=round(eccs[-1], 4) if eccs else 0.0,
                 resonance_score=0.0,
-            ))
+            )
+            gaps.append(edge_gap)
+            added.append((edge_gap, edge_step))
+        return added
 
     def _apply_cross_gap_consistency(self, gaps: list[GapResult],
                                      tb_result: TBResult | None) -> None:
@@ -592,10 +737,12 @@ class GapPredictor:
                         avg_quality = (gaps[i].combined_score + gaps[j].combined_score) / 2.0
                         quality_factor = 0.5 + 0.5 * avg_quality
                         boost *= quality_factor
-                        gaps[i].combined_score = round(
-                            min(1.0, gaps[i].combined_score + boost), 3)
-                        gaps[j].combined_score = round(
-                            min(1.0, gaps[j].combined_score + boost), 3)
+                        # v0.7: multiplicative, so a gated (TB~0) gap
+                        # cannot be lifted back up by a neighbour's boost.
+                        gaps[i].combined_score = min(
+                            1.0, gaps[i].combined_score * (1.0 + boost))
+                        gaps[j].combined_score = min(
+                            1.0, gaps[j].combined_score * (1.0 + boost))
 
     @staticmethod
     def _get_system_name(system) -> str:
