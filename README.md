@@ -1,6 +1,12 @@
 # 🌟 Stellar Predictor
 
-**Detect orbital gaps that could host unknown planets — through Titius-Bode law fitting, Hill-radius stability analysis, and multi-signal pattern fusion.**
+**Explore hypothetical planetary orbits with Titius-Bode spacing fits, Hill-radius separation checks, and resonance scoring.**
+
+A Python CLI and FastAPI/Plotly web interface for astronomy enthusiasts and developers exploring orbital-pattern models. Select a known planetary system, visualize candidate gaps, and inspect bilingual reports.
+
+> **Exploratory modeling, not a planet discovery claim.** Candidate scores are model-derived rankings, not calibrated probabilities that a planet exists. Empirical spacing fits, simplified stability checks, and estimated physical parameters require independent observational and dynamical validation.
+
+[Quick Start](#-quick-start) · [Web Interface](#-web-interface) · [Model Diagnostics](#model-diagnostics) · [How It Works](#-how-it-works)
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-teal?logo=fastapi)](https://fastapi.tiangolo.com)
@@ -39,6 +45,9 @@ The web interface provides:
 ## 🚀 Quick Start
 
 ```bash
+git clone https://github.com/bigdaddyzc/STELLAR-PREDICTOR.git
+cd STELLAR-PREDICTOR
+
 # Install (editable, with dev tools and the web interface)
 pip install -e ".[dev,web]"
 
@@ -135,11 +144,15 @@ All predicted gaps pass through 6 checks before being shown:
 | Sub-gap stability | ≥ 0.10 | Remove unsupported sub-gaps |
 | Position sanity | a ≤ 500 AU | Remove extreme outliers |
 
-**Result**: 46 raw predictions → 25 reliable (54% reliability rate)
+**Example filter output**: 46 raw candidates → 25 pass the configured filter (54% retention). Passing this filter is not observational confirmation or a measured discovery accuracy.
 
 ---
 
-## 📊 Accuracy
+<a id="model-diagnostics"></a>
+
+## 📊 Model Diagnostics and Retrodiction
+
+The results below are the project's reported example runs and held-out-body reconstruction checks, not a prospective discovery benchmark. A high spacing-fit R² or filter-passing score does not establish that an unobserved body exists.
 
 | System | TB R² | Total | Reliable | Top Prediction |
 |--------|-------|-------|----------|----------------|
